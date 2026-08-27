@@ -1,9 +1,15 @@
 # STX WebSockets
 
+> **Superseded.** This page predates the `/api/v1` REST API and describes the
+> exchange as GraphQL-only, on hostnames we no longer publish. It is kept here
+> only until [docs.stxapp.io](https://docs.stxapp.io) fully replaces it. Where it
+> disagrees with [README.md](./README.md) or the docs site, it is wrong.
+
 Everything real-time arrives over one WebSocket connection. This document covers the
 protocol, the channels, and the behaviours that are easy to get wrong.
 
-`stx_watch.py` in this repo is a working implementation of everything described here.
+[`python/websockets/watch.py`](./python/websockets/watch.py) in this repo is a working
+implementation of everything described here.
 
 ## Connecting
 
@@ -22,7 +28,7 @@ API with two differences:
 
 | | GraphQL | WebSocket |
 | --- | --- | --- |
-| Header names | `STX-ACCESS-KEY`, ... | `X-STX-ACCESS-KEY`, ... (**`X-` prefix**) |
+| Header names | `X-STX-ACCESS-KEY`, ... | `X-STX-ACCESS-KEY`, ... (the same, `X-` prefixed) |
 | Signed message | `<ts>POST/api/graphql` | `<ts>GET/socket/websocket` |
 
 The `X-` prefix is required because the socket transport only surfaces `x-*` headers. The

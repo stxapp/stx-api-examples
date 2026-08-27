@@ -1,9 +1,9 @@
 # Request signing
 
-> **Superseded.** This page predates the `/api/v1` REST API and describes the
-> exchange as GraphQL-only, on hostnames we no longer publish. It is kept here
-> only until [docs.stxapp.io](https://docs.stxapp.io) fully replaces it. Where it
-> disagrees with [README.md](./README.md) or the docs site, it is wrong.
+> The authoritative version of this page is
+> [docs.stxapp.io/api/authentication](https://docs.stxapp.io/api/authentication/),
+> where the test vector is recomputed on every build. Where this copy disagrees
+> with it, the docs site is right.
 
 The scheme in full, with a test vector so you can confirm your implementation before pointing
 it at the exchange. Nothing here is Python-specific - any language with Ed25519 works, and the
@@ -25,10 +25,11 @@ The message is three values concatenated with **no separator**:
 message = timestamp_ms + HTTP_METHOD_UPPERCASE + request_path
 ```
 
-For GraphQL, which always posts to the same path:
+The path is the endpoint you are calling, including any query string, and never the scheme
+or host:
 
 ```
-1700000000000POST/api/graphql
+1700000000000POST/api/v1/me
 ```
 
 Rules that matter:
@@ -43,9 +44,8 @@ Rules that matter:
 - **±30 seconds.** The timestamp must be within 30 seconds of our clock, so generate it per
   request and keep your host on NTP. Do not cache or reuse a signature.
 
-The `X-` prefix is required on both transports. It has been since 2026-08-25, and there is no
-fallback to the older unprefixed names. On the WebSocket you also sign method `GET` against the
-handshake path with the query string dropped:
+On the WebSocket you sign method `GET` against the handshake path with the query string
+dropped:
 
 ```
 1700000000000GET/socket/websocket
@@ -69,8 +69,8 @@ MC4CAQAwBQYDK2VwBCIEIAABAgMEBQYHCAkKCwwNDg8QERITFBUWFxgZGhscHR4f
 
 | | |
 | --- | --- |
-| Message | `1700000000000POST/api/graphql` |
-| Signature | `HDg79kZLqA4eJACLMafxLk4Pyi3iTjFP/u+iXqlkpCJb33ILkKAKshjyOsIHWkyNC+jbbjgpwdg4Sn1N2xgvBQ==` |
+| Message | `1700000000000POST/api/v1/me` |
+| Signature | `ZFJ0qEoHt8TLKbGP+UhJ77BNy/Cdf7+oqbQzwynaM5XM0Yphmq5t1YWumC+5pLaDk/xY9EG3h4brxVdodYloCA==` |
 
 Byte-identical output means your key loading, message construction, signing mode and base64
 encoding are all correct, and any later `unauthorized` is a timestamp, header or key-id problem
@@ -90,7 +90,7 @@ with open("test_key.pem", "rb") as fh:
     key = serialization.load_pem_private_key(fh.read(), password=None)
 
 timestamp = str(int(time.time() * 1000))
-message = f"{timestamp}POST/api/graphql".encode("utf-8")
+message = f"{timestamp}POST/api/v1/me".encode("utf-8")
 signature = base64.b64encode(key.sign(message)).decode()
 ```
 
@@ -104,7 +104,7 @@ import { readFileSync } from 'fs';
 
 const key = createPrivateKey(readFileSync('test_key.pem'));
 const timestamp = Date.now().toString();
-const message = Buffer.from(`${timestamp}POST/api/graphql`, 'utf8');
+const message = Buffer.from(`${timestamp}POST/api/v1/me`, 'utf8');
 const signature = sign(null, message, key).toString('base64');
 ```
 
@@ -130,7 +130,7 @@ parsed, _ := x509.ParsePKCS8PrivateKey(block.Bytes)
 key := parsed.(ed25519.PrivateKey)
 
 timestamp := fmt.Sprintf("%d", time.Now().UnixMilli())
-message := []byte(timestamp + "POST/api/graphql")
+message := []byte(timestamp + "POST/api/v1/me")
 signature := base64.StdEncoding.EncodeToString(ed25519.Sign(key, message))
 ```
 
@@ -152,7 +152,7 @@ PrivateKey key = KeyFactory.getInstance("Ed25519")
 String timestamp = String.valueOf(System.currentTimeMillis());
 Signature signer = Signature.getInstance("Ed25519");
 signer.initSign(key);
-signer.update((timestamp + "POST/api/graphql").getBytes("UTF-8"));
+signer.update((timestamp + "POST/api/v1/me").getBytes("UTF-8"));
 String signature = Base64.getEncoder().encodeToString(signer.sign());
 ```
 
@@ -164,16 +164,14 @@ Useful for a one-off curl or for filling in Postman variables:
 
 ```bash
 TS=$(python3 -c 'import time; print(int(time.time()*1000))')
-SIG=$(printf "%sPOST/api/graphql" "$TS" \
-  | openssl pkeyutl -sign -inkey ~/.stx/ontario-staging.pem -rawin \
+SIG=$(printf "%sPOST/api/v1/me" "$TS" \
+  | openssl pkeyutl -sign -inkey ~/.stx/demo.pem -rawin \
   | openssl base64 -A)
 
-curl -s https://staging.on.sportsxapp.com/api/graphql \
-  -H "Content-Type: application/json" \
+curl -s https://demo.stxapp.io/api/v1/me \
   -H "X-STX-ACCESS-KEY: $STX_KEY_ID" \
   -H "X-STX-ACCESS-TIMESTAMP: $TS" \
-  -H "X-STX-ACCESS-SIGNATURE: $SIG" \
-  -d '{"query":"query { myOrderHistory { totalCount } }"}'
+  -H "X-STX-ACCESS-SIGNATURE: $SIG"
 ```
 
 `-rawin` is what selects pure Ed25519. OpenSSL 1.1.1 or newer.
@@ -204,12 +202,11 @@ signature failure, so the cause has to come from your side.
 
 1. Is the method uppercase in the message?
 2. Does the path match exactly, including any query string, and exclude scheme and host?
-3. On the WebSocket: did you sign `GET` and `/socket/websocket` **without** `?vsn=2.0.0`, and use
-   the `X-` prefixed header names?
+3. On the WebSocket: did you sign `GET` and `/socket/websocket` **without** `?vsn=2.0.0`?
 4. Is the base64 standard and padded, rather than URL-safe?
 5. Are you signing the message bytes rather than a hash of them?
 6. Is the timestamp in the message byte-for-byte the one in the header?
-7. Is your clock within 30 seconds of ours? `curl -sI https://staging.on.sportsxapp.com | grep -i date`
+7. Is your clock within 30 seconds of ours? `curl -sI https://demo.stxapp.io | grep -i date`
 
 If the test vector above reproduces exactly and a real request still fails, the problem is the
 Key ID, the key's status, or the clock - not the signing.

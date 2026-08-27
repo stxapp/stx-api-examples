@@ -177,10 +177,10 @@ def render_event(label, event, payload):
 
 async def watch(config, private_key, user_id, market, cancel_on_disconnect, ping_timeout_ms):
     # The handshake signs GET against /socket/websocket with the query string
-    # DROPPED - `?vsn=2.0.0` is on the URL but not in the signed message. The
-    # X- prefix is not optional here: Phoenix's transport only surfaces x-*
-    # headers, so unprefixed names connect anonymously and then fail on the
-    # first private channel with "unauthorized".
+    # DROPPED - `?vsn=2.0.0` is on the URL but not in the signed message.
+    # Phoenix's transport only surfaces x-* headers, so the names must be exact
+    # or the socket connects without credentials and then fails on the first
+    # private channel with "unauthorized".
     headers = stx.signed_headers(private_key, config["key_id"], "GET", stx.SOCKET_PATH)
     url = f"{config['socket_url']}?vsn=2.0.0"
 

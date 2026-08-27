@@ -182,7 +182,7 @@ waiting for a tick.
 | | |
 | --- | --- |
 | [SOCKETS.md](./SOCKETS.md) | Every channel and event, cancel-on-disconnect, reconnect procedure |
-| [SIGNING.md](./SIGNING.md) | Signing in Node.js, Go, Java or shell, with a test vector |
+| [Authentication](https://docs.stxapp.io/api/authentication/) | Signing in Python, Node.js, Go, Java, C# or shell, with a test vector |
 | [README.md](./README.md) | The operation list, pagination, price units |
 | [schema/](./schema) | GraphQL schema for editor autocomplete and code generation |
 | [postman/](./postman) | One request per operation, foldered by what authentication it needs |
@@ -193,7 +193,7 @@ own `clientOrderId` and `cancelOnDisconnect: true`, re-quote with `cancelOrders`
 channel rather than polling. Maker trades are commission free.
 
 Stuck on any step above? Ask in Discord - **https://discord.gg/yF9eVzPzNZ** - where you will be talking to the
-engineers who build the exchange. [SUPPORT.md](./SUPPORT.md) lists what to include so we can
+engineers who build the exchange. [Support](https://docs.stxapp.io/support/) lists what to include so we can
 answer in one round trip, and we are happy to open a shared Slack channel for a live
 integration.
 

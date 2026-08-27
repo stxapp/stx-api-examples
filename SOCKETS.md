@@ -28,11 +28,10 @@ API with two differences:
 
 | | GraphQL | WebSocket |
 | --- | --- | --- |
-| Header names | `X-STX-ACCESS-KEY`, ... | `X-STX-ACCESS-KEY`, ... (the same, `X-` prefixed) |
+| Header names | `X-STX-ACCESS-KEY`, ... | `X-STX-ACCESS-KEY`, ... (the same) |
 | Signed message | `<ts>POST/api/graphql` | `<ts>GET/socket/websocket` |
 
-The `X-` prefix is required because the socket transport only surfaces `x-*` headers. The
-query string is **not** part of the signed path - sign `/socket/websocket` even though you
+The query string is **not** part of the signed path - sign `/socket/websocket` even though you
 connect with `?vsn=2.0.0`. A bad signature is rejected at the handshake with HTTP 403, so
 failures surface as a connection error rather than a channel error.
 
@@ -261,5 +260,5 @@ the book becomes an order.
 ## Still stuck?
 
 Ask in Discord - **https://discord.gg/yF9eVzPzNZ**. Include the operation or channel
-name, the environment, and the exact error text. [SUPPORT.md](./SUPPORT.md) lists what
+name, the environment, and the exact error text. [Support](https://docs.stxapp.io/support/) lists what
 helps us answer in one round trip.

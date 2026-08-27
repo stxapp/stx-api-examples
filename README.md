@@ -163,8 +163,6 @@ timestamp_ms + HTTP_METHOD_UPPERCASE + path
 - The timestamp must be within **30 seconds** of the server clock. Generate it
   per request and keep the machine on NTP; a clock a minute fast fails every
   request with a 401 that looks exactly like a bad key.
-- The `X-` prefix is **required**. It has been since 2026-08-25; there is no
-  fallback to the older unprefixed names.
 
 The WebSocket handshake signs the same way, with one difference: the method is
 `GET` and the path is `/socket/websocket` with **any query string dropped**, even
@@ -254,9 +252,8 @@ Worth knowing before you hit them:
 
 ## Also in this repository
 
-`GETTING_STARTED.md`, `SIGNING.md`, `SOCKETS.md` and `SUPPORT.md` predate the
-REST API and describe the exchange as GraphQL-only, on hostnames we no longer
-publish. They are being replaced by [docs.stxapp.io](https://docs.stxapp.io) and
+`GETTING_STARTED.md` and `SOCKETS.md` predate the REST API and describe the
+exchange as GraphQL-only, on hostnames we no longer publish. They are being replaced by [docs.stxapp.io](https://docs.stxapp.io) and
 are kept here only until that move completes. **Where they disagree with this
 file or with the docs site, they are wrong.**
 
@@ -267,7 +264,7 @@ building on the exchange and you are talking to the engineers who build it:
 
 **https://discord.gg/yF9eVzPzNZ**
 
-See [SUPPORT.md](./SUPPORT.md) for what to include when asking about a failing
+See [Support](https://docs.stxapp.io/support/) for what to include when asking about a failing
 request, and for the shared-Slack option on larger integrations.
 
 There are no enforced rate limits today. Prefer the batch cancel endpoints over

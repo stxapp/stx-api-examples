@@ -84,8 +84,8 @@ if (args.market) {
 
 // The handshake signs GET against /socket/websocket with the query string
 // DROPPED - phoenix appends ?vsn=2.0.0 itself, and it is not in the signed
-// message. The X- prefix is not optional: Phoenix's transport only surfaces
-// x-* headers, so unprefixed names connect anonymously and then fail on the
+// message. Phoenix's transport only surfaces x-* headers, so the names must be
+// exact or the socket connects without credentials and then fails on the
 // first private channel with "unauthorized".
 //
 // Signing inside the constructor rather than once up front matters. phoenix

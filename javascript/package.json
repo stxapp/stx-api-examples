@@ -1,0 +1,15 @@
+{
+  "name": "@stxapp/stx-api-examples",
+  "version": "1.0.0",
+  "private": true,
+  "description": "JavaScript examples for the STX exchange API: signed REST, signed GraphQL, and Phoenix channel WebSockets.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "comment": "The REST and GraphQL examples import nothing but node: builtins - Node has Ed25519 and fetch. These two dependencies exist only for the WebSocket examples: `phoenix` is the exchange's own channel client (join_ref bookkeeping, heartbeat, rejoin), and `ws` is the transport it needs under Node, because the built-in WebSocket cannot set the handshake headers the signature travels in. Versions are exact, and package-lock.json is committed: run `npm ci`.",
+  "dependencies": {
+    "phoenix": "1.8.13",
+    "ws": "8.21.3"
+  }
+}

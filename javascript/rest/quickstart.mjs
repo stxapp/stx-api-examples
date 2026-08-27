@@ -1,0 +1,226 @@
+// STX REST quickstart - signed requests, market data, and an order round trip.
+//
+//   node javascript/rest/quickstart.mjs me           # who this key belongs to
+//   node javascript/rest/quickstart.mjs markets      # markets with a resting book
+//   node javascript/rest/quickstart.mjs orders       # your open orders
+//   node javascript/rest/quickstart.mjs roundtrip    # place a resting order, then cancel it
+//
+// Add --profile <name> to use a profile other than [default]:
+//
+//   node javascript/rest/quickstart.mjs --profile ca-integration markets
+//
+// ZERO DEPENDENCIES. Node has Ed25519 in node:crypto and fetch built in, so
+// there is nothing to npm install for this file - `./install.sh` is only needed
+// for the WebSocket examples. Node 20 or newer.
+//
+// Credentials come from ~/.stx/credentials, written by ./configure. Every
+// /api/v1 route requires a signature - there are no public REST endpoints - so
+// even `markets` needs a key. `roundtrip` needs a read_write one.
+
+import { loadProfile, signedHeaders, parseArgs, fail } from "../stx.mjs";
+
+/**
+ * Send one signed request and return the decoded JSON.
+ *
+ * The signature covers the method and the path INCLUDING any query string, so
+ * the path is built before signing and then used verbatim. Signing
+ * /api/v1/markets and sending /api/v1/markets?status=open is a 401.
+ */
+async function request(config, method, path, body) {
+  const response = await fetch(config.baseUrl + path, {
+    method,
+    headers: {
+      ...signedHeaders(config, method, path),
+      "Content-Type": "application/json",
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+
+  const text = await response.text();
+
+  if (response.status === 401) {
+    fail(
+      `401 unauthorized.\n` +
+        `  The signature, key id or timestamp was rejected. The most common causes:\n` +
+        `  - the key belongs to a different environment than ${config.exchange}/${config.environment}\n` +
+        `  - the machine clock is more than 30 seconds off\n` +
+        `  Body: ${text.slice(0, 300)}`
+    );
+  }
+
+  if (!response.ok) {
+    // 422 is the exchange rejecting a well-formed, authenticated request - a
+    // price at or above the market's max_price, say. Read the message in full.
+    fail(`HTTP ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  return JSON.parse(text);
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/v1/me - the only place your user id is published.
+ *
+ * Private WebSocket topics are scoped by it: active_orders:<user_id>,
+ * portfolio:<user_id>, and so on. Fetch it once at startup and hold it.
+ */
+async function cmdMe(config) {
+  const { me } = await request(config, "GET", "/api/v1/me");
+  console.log(`user_id     ${me.user_id}`);
+  console.log(`account_id  ${me.account_id}`);
+  console.log(`key_id      ${me.key_id}`);
+  console.log(`scope       ${me.scope}`);
+  if (me.scope === "read_only") {
+    console.log("\nThis key cannot place or cancel orders. `roundtrip` needs read_write.");
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Market data
+// ---------------------------------------------------------------------------
+
+/**
+ * One page of markets.
+ *
+ * Collections come back as {cursor, markets: [...]}, not {data: [...]}. Pass
+ * the cursor back as ?cursor=... for the next page; it is null on the last.
+ *
+ * Known issue: ?status=open also returns suspended markets, and there is no
+ * server-side "only tradeable" filter today - trading=true is ignored as a
+ * query param. Filter on the `trading` field client-side, as below.
+ */
+async function listMarkets(config, limit = 200) {
+  const { markets } = await request(
+    config,
+    "GET",
+    `/api/v1/markets?status=open&limit=${limit}`
+  );
+  return markets;
+}
+
+/** Markets that are actually quotable right now, deepest book first. */
+function tradeable(markets) {
+  return markets
+    .filter((m) => m.trading && m.status === "open")
+    .sort(
+      (a, b) =>
+        (b.bids?.length ?? 0) + (b.offers?.length ?? 0) -
+        ((a.bids?.length ?? 0) + (a.offers?.length ?? 0))
+    );
+}
+
+async function cmdMarkets(config) {
+  const open = await listMarkets(config);
+  const markets = tradeable(open);
+  if (markets.length === 0) fail("No tradeable markets right now.");
+
+  // Prices are integer cents everywhere in the REST API. A US market settles at
+  // $1, so max_price is 100 and quotes run 1-99. A Canadian market settles at
+  // $100 and max_price is 10000. Read it off the market, do not assume.
+  console.log(
+    `${"SYMBOL".padEnd(28)} ${"BID".padStart(7)} ${"OFFER".padStart(7)} ${"MAX".padStart(7)}  TITLE`
+  );
+  for (const market of markets.slice(0, 15)) {
+    const bid = market.bids?.[0] ? `${market.bids[0].price}c` : "-";
+    const offer = market.offers?.[0] ? `${market.offers[0].price}c` : "-";
+    console.log(
+      `${market.symbol.slice(0, 28).padEnd(28)} ${bid.padStart(7)} ${offer.padStart(7)} ` +
+        `${`${market.max_price}c`.padStart(7)}  ${(market.title ?? "").slice(0, 40)}`
+    );
+  }
+
+  console.log(`\n${markets.length} tradeable of ${open.length} returned by ?status=open.`);
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+async function cmdOrders(config) {
+  const { orders } = await request(config, "GET", "/api/v1/orders?status=open");
+  if (orders.length === 0) {
+    console.log("No open orders.");
+    return;
+  }
+
+  console.log(
+    `${"ID".padEnd(38)} ${"SIDE".padEnd(5)} ${"QTY".padStart(6)} ${"PRICE".padStart(7)} ${"FILLED".padStart(7)}  STATUS`
+  );
+  for (const order of orders) {
+    const price = order.price == null ? "MKT" : `${order.price}c`;
+    console.log(
+      `${order.id.padEnd(38)} ${order.action.padEnd(5)} ${String(order.quantity).padStart(6)} ` +
+        `${price.padStart(7)} ${String(order.filled ?? 0).padStart(7)}  ${order.status}`
+    );
+  }
+}
+
+/**
+ * Place a limit order well away from the touch, then cancel it.
+ *
+ * Priced so it should rest rather than fill, but this is a real order on a real
+ * book: on integration that costs nothing, on production it does not.
+ */
+async function cmdRoundtrip(config, args) {
+  if (config.environment === "production" && !args["force-production"]) {
+    fail(
+      `Refusing to place orders against production from an example script.\n` +
+        `Profile [${config.profile}] points at ${config.baseUrl}.\n` +
+        `Pass --force-production if you really mean to.`
+    );
+  }
+
+  const market = tradeable(await listMarkets(config)).find((m) => m.bids?.length > 0);
+  if (!market) fail("No tradeable market with a bid to price against.");
+
+  const bestBid = market.bids[0].price;
+
+  // Ten cents under the touch, floored at 1c. The ceiling is the market's own
+  // max_price, and the rejection message reports it in DOLLARS while the field
+  // is CENTS: price 4650 on a $1 market returns "The order's price must be
+  // lower than 1.00".
+  const price = Math.max(1, bestBid - 10);
+
+  console.log(`${market.symbol}  best bid ${bestBid}c, max_price ${market.max_price}c`);
+  console.log(`placing    BUY 1 @ ${price}c`);
+
+  // The body is flat. Wrapping it in {user_order: {...}}, the way the GraphQL
+  // mutation takes it, returns 400. And a successful placement is a 200, not a
+  // 201.
+  const { order } = await request(config, "POST", "/api/v1/orders", {
+    market_id: market.market_id,
+    order_type: "limit",
+    action: "buy",
+    price,
+    quantity: 1,
+    // Your own reference, echoed back on the order and on every socket push
+    // about it. Use it to tie exchange state to your own.
+    client_order_id: `quickstart-${Date.now()}`,
+  });
+  console.log(`placed     ${order.id}  status=${order.status}  filled=${order.filled ?? 0}`);
+
+  const cancelled = await request(config, "DELETE", `/api/v1/orders/${order.id}`);
+  console.log(`cancelled  status=${cancelled.status}`);
+}
+
+const COMMANDS = {
+  me: cmdMe,
+  markets: cmdMarkets,
+  orders: cmdOrders,
+  roundtrip: cmdRoundtrip,
+};
+
+const args = parseArgs();
+const command = args._[0] ?? "me";
+
+if (!COMMANDS[command]) {
+  fail(`Unknown command "${command}". One of: ${Object.keys(COMMANDS).join(", ")}`);
+}
+
+const config = loadProfile(args.profile);
+console.error(`[${config.profile} -> ${config.baseUrl}]\n`);
+
+await COMMANDS[command](config, args);

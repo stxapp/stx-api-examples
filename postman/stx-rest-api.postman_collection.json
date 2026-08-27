@@ -1,0 +1,728 @@
+{
+  "info": {
+    "_postman_id": "b7f1c0de-0000-4000-8000-5f7a9b1c2d00",
+    "name": "STX REST API (/api/v1)",
+    "description": "The STX exchange REST API.\n\nEvery route requires an Ed25519 signature - there are no public REST endpoints. Postman's script sandbox has no Ed25519 implementation, so the signature cannot be computed here: set the `timestamp` and `signature` collection variables per request with the openssl one-liner in postman/README.md, or use ./verify, javascript/rest/quickstart.mjs or python/rest/quickstart.py, which sign for you.\n\nPrices are integer cents throughout. A market's ceiling is its own max_price (100 on a US $1 market, 10000 on a Canadian $100 market), not a fixed 99.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "https://demo.stxapp.io",
+      "description": "US integration. Canada integration is https://api-staging.on.sportsxapp.com; Canada production is https://api.on.stxapp.ca."
+    },
+    {
+      "key": "key_id",
+      "value": "",
+      "description": "Your API key id. Not a secret."
+    },
+    {
+      "key": "timestamp",
+      "value": "",
+      "description": "Unix MILLISECONDS, as a string. Must be within 30s of the server clock."
+    },
+    {
+      "key": "signature",
+      "value": "",
+      "description": "base64 Ed25519 signature of timestamp + METHOD + path. Regenerate per request."
+    },
+    {
+      "key": "market_id",
+      "value": "",
+      "description": "A market UUID from GET /api/v1/markets."
+    },
+    {
+      "key": "order_id",
+      "value": "",
+      "description": "An order UUID from POST or GET /api/v1/orders."
+    }
+  ],
+  "item": [
+    {
+      "name": "Identity",
+      "item": [
+        {
+          "name": "Get the authenticated account",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/me",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me"
+              ]
+            },
+            "description": "Returns {\"me\": {...}} - user_id, account_id, key_id, scope. This is the only place your user_id is published, and private WebSocket topics (active_orders:<user_id>) need it.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Markets",
+      "item": [
+        {
+          "name": "List markets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/markets?status=open&limit=50",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "markets"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "open"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Returns {cursor, markets: [...]}. Pass the cursor back as ?cursor=... for the next page; it is null on the last page.\n\nKnown issue: ?status=open also returns suspended markets, and trading=true is ignored as a query param. Filter on the `trading` field client-side.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "List events",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "events"
+              ]
+            },
+            "description": "Returns {cursor, events: [...]}.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Orders",
+      "item": [
+        {
+          "name": "Place an order",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/orders",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders"
+              ]
+            },
+            "description": "Returns 200 (not 201) as {\"order\": {...}}.\n\nThe body is FLAT: wrapping it in {\"user_order\": {...}}, the way the GraphQL mutation takes it, returns 400.\n\n`price` is a whole number of cents, strictly below the market's max_price. A rejection reports the cap in DOLLARS while the field is CENTS: price 4650 on a $1 market returns 422 \"The order's price must be lower than 1.00\".\n\nNeeds a read_write key.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"market_id\": \"{{market_id}}\",\n  \"order_type\": \"limit\",\n  \"action\": \"buy\",\n  \"price\": 42,\n  \"quantity\": 5,\n  \"client_order_id\": \"postman-1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List orders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/orders?status=open&limit=50",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "open"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Returns {cursor, orders: [...]}, most recent first. Filters: order_ids, client_order_ids, market_ids, status - all comma-separated.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Get an order",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/orders/{{order_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{order_id}}"
+              ]
+            },
+            "description": "Returns {\"order\": {...}}, or 404 for an id that is not yours.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel an order",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/orders/{{order_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "{{order_id}}"
+              ]
+            },
+            "description": "Returns {order_id, status, next_geolocation_at}.\n\nA cancel is a request, not a guarantee: a fill already in flight can still land afterwards.\n\nNeeds a read_write key.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel several orders",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/orders/batched",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "batched"
+              ]
+            },
+            "description": "Returns {cancellations: [{order_id, status}]}. Each entry of the request is an OBJECT carrying an order_id, not a bare id string. An unknown id comes back with status \"Order not found\" rather than failing the call.\n\nNeeds a read_write key.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orders\": [\n    {\n      \"order_id\": \"{{order_id}}\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Cancel all open orders",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/orders/all",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "all"
+              ]
+            },
+            "description": "Returns {cancellations: [...]} for everything open on the account.\n\nNeeds a read_write key.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Positions and history",
+      "item": [
+        {
+          "name": "List trades",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/trades?limit=50",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "trades"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Returns {cursor, trades: [...]} - your fills.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Get account market stats",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/market_stats",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "account",
+                "market_stats"
+              ]
+            },
+            "description": "Your position and exposure per market.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "List settlements",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/portfolio/settlements?limit=50",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "portfolio",
+                "settlements"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Returns {cursor, settlements: [...]}. Note `time` rather than an inserted_at_iso field.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "List deposits",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/portfolio/deposits",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "portfolio",
+                "deposits"
+              ]
+            },
+            "description": "Returns {cursor, deposits: [...]}.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "List withdrawals",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/portfolio/withdrawals",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "portfolio",
+                "withdrawals"
+              ]
+            },
+            "description": "Returns {cursor, withdrawals: [...]}.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "Get loyalty status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/portfolio/loyalty",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "portfolio",
+                "loyalty"
+              ]
+            },
+            "description": "Loyalty tier and points.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Terms",
+      "item": [
+        {
+          "name": "Accept terms and conditions",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/tnc/accept",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tnc",
+                "accept"
+              ]
+            },
+            "description": "Records acceptance of the current terms for the authenticated account. Some trading operations are refused until this has been done.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}

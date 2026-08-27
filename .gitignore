@@ -5,7 +5,10 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
-# Credentials - never commit these
+# Node
+node_modules/
+
+# Credentials - never commit these. ./configure writes them to ~/.stx/ instead.
 *.pem
 credentials
 .env

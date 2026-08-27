@@ -1,5 +1,10 @@
 # Getting started
 
+> **Superseded.** This page predates the `/api/v1` REST API and describes the
+> exchange as GraphQL-only, on hostnames we no longer publish. It is kept here
+> only until [docs.stxapp.io](https://docs.stxapp.io) fully replaces it. Where it
+> disagrees with [README.md](./README.md) or the docs site, it is wrong.
+
 From clone to a live order in about ten minutes. Every step here has been run end to end
 against Ontario staging.
 
@@ -96,7 +101,8 @@ python stx_quickstart.py --profile ontario-staging orders
 
 A count, even zero, means your signature verified. If you get `unauthorized`, it is almost
 always clock skew (the timestamp must be within 30 seconds of ours) or a missing header - the
-troubleshooting table in [python/README.md](./python/README.md) lists every cause.
+troubleshooting table that used to live in `python/README.md` has moved to
+[docs.stxapp.io](https://docs.stxapp.io).
 
 **About `user_id`:** the private WebSocket channels are scoped by user id, and there is
 currently no self-service way to read yours, so ask us and we will send it. This is a gap we

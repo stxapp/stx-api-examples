@@ -1,5 +1,10 @@
 # Request signing
 
+> **Superseded.** This page predates the `/api/v1` REST API and describes the
+> exchange as GraphQL-only, on hostnames we no longer publish. It is kept here
+> only until [docs.stxapp.io](https://docs.stxapp.io) fully replaces it. Where it
+> disagrees with [README.md](./README.md) or the docs site, it is wrong.
+
 The scheme in full, with a test vector so you can confirm your implementation before pointing
 it at the exchange. Nothing here is Python-specific - any language with Ed25519 works, and the
 snippets below are all verified to produce identical output.
@@ -10,9 +15,9 @@ Every authenticated request carries three headers:
 
 | Header | Value |
 | --- | --- |
-| `STX-ACCESS-KEY` | your Key ID, from Account -> API Keys |
-| `STX-ACCESS-TIMESTAMP` | current Unix time in **milliseconds**, as a decimal string |
-| `STX-ACCESS-SIGNATURE` | base64 Ed25519 signature of the message below |
+| `X-STX-ACCESS-KEY` | your Key ID, from Account -> API Keys |
+| `X-STX-ACCESS-TIMESTAMP` | current Unix time in **milliseconds**, as a decimal string |
+| `X-STX-ACCESS-SIGNATURE` | base64 Ed25519 signature of the message below |
 
 The message is three values concatenated with **no separator**:
 
@@ -38,8 +43,8 @@ Rules that matter:
 - **±30 seconds.** The timestamp must be within 30 seconds of our clock, so generate it per
   request and keep your host on NTP. Do not cache or reuse a signature.
 
-On the WebSocket the same three headers take an **`X-` prefix** - `X-STX-ACCESS-KEY` and so on -
-because that transport only surfaces `x-*` headers. There you sign method `GET` against the
+The `X-` prefix is required on both transports. It has been since 2026-08-25, and there is no
+fallback to the older unprefixed names. On the WebSocket you also sign method `GET` against the
 handshake path with the query string dropped:
 
 ```
@@ -89,7 +94,7 @@ message = f"{timestamp}POST/api/graphql".encode("utf-8")
 signature = base64.b64encode(key.sign(message)).decode()
 ```
 
-`pip install cryptography`. Full example: [python/stx_quickstart.py](./python/stx_quickstart.py).
+`pip install cryptography`. Full example: [python/stx.py](./python/stx.py).
 
 ### Node.js
 
@@ -165,9 +170,9 @@ SIG=$(printf "%sPOST/api/graphql" "$TS" \
 
 curl -s https://staging.on.sportsxapp.com/api/graphql \
   -H "Content-Type: application/json" \
-  -H "STX-ACCESS-KEY: $STX_KEY_ID" \
-  -H "STX-ACCESS-TIMESTAMP: $TS" \
-  -H "STX-ACCESS-SIGNATURE: $SIG" \
+  -H "X-STX-ACCESS-KEY: $STX_KEY_ID" \
+  -H "X-STX-ACCESS-TIMESTAMP: $TS" \
+  -H "X-STX-ACCESS-SIGNATURE: $SIG" \
   -d '{"query":"query { myOrderHistory { totalCount } }"}'
 ```
 

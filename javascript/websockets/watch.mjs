@@ -21,7 +21,9 @@
 
 import { Socket } from "phoenix";
 import WebSocket from "ws";
-import { loadProfile, signedHeaders, parseArgs, fail, SOCKET_PATH, bookPriceCents } from "../stx.mjs";
+import {
+  loadProfile, signedHeaders, parseArgs, argList, fail, SOCKET_PATH, bookPriceCents,
+} from "../stx.mjs";
 
 // Two independent timers, and the socket heartbeat only resets one of them.
 //
@@ -110,6 +112,15 @@ socket.connect();
 
 const stamp = () => new Date().toISOString().slice(11, 19);
 
+// Every stamped line goes through `line()` so BOOK, MARKET and the event rows
+// share one column. The separator is a space of its own rather than padding,
+// because a label exactly LABEL_WIDTH wide would otherwise run into the text:
+// USER_INFO, reachable via --topic, is 9 characters.
+const LABEL_WIDTH = 9;
+
+/** One output row: time, label column, then whatever the caller has. */
+const line = (label, rest) => `${stamp()}  ${label.padEnd(LABEL_WIDTH)} ${rest}`;
+
 // ---------------------------------------------------------------------------
 // The book. Every price here is integer cents.
 // ---------------------------------------------------------------------------
@@ -119,7 +130,7 @@ function renderBook(payload) {
   const offers = payload?.ob?.o ?? [];
   const bid = bids[0] ? `${String(bids[0].q).padStart(6)} @ ${String(bookPriceCents(bids[0].p)).padStart(4)}c` : " ".repeat(14);
   const offer = offers[0] ? `${`${bookPriceCents(offers[0].p)}c`.padEnd(5)} @ ${String(offers[0].q).padEnd(6)}` : "";
-  console.log(`${stamp()}  BOOK   ${bid}   |   ${offer}   (${bids.length}x${offers.length} levels)`);
+  console.log(line("BOOK", `${bid}   |   ${offer}   (${bids.length}x${offers.length} levels)`));
 }
 
 const bookChannel = socket.channel(`market:${market.market_id}`, {});
@@ -135,7 +146,7 @@ bookChannel
 
 bookChannel.on("order_book_update", renderBook);
 bookChannel.on("market_update", (payload) =>
-  console.log(`${stamp()}  MARKET status=${payload.status} trading=${payload.trading}`)
+  console.log(line("MARKET", `status=${payload.status} trading=${payload.trading}`))
 );
 
 // ---------------------------------------------------------------------------
@@ -152,7 +163,7 @@ function renderEvent(label, event, payload) {
   // Snapshot events arrive once on join and can carry hundreds of rows.
   for (const key of ["orders", "trades", "positions", "settlements"]) {
     if (Array.isArray(payload?.[key])) {
-      console.log(`${stamp()}  ${label.padEnd(8)}${event}: ${payload[key].length} row(s)`);
+      console.log(line(label, `${event}: ${payload[key].length} row(s)`));
       return;
     }
   }
@@ -162,7 +173,7 @@ function renderEvent(label, event, payload) {
     .join("  ");
 
   console.log(
-    `${stamp()}  ${label.padEnd(8)}${event}  ` +
+    line(label, `${event}  `) +
       (fields || JSON.stringify(payload).slice(0, 200))
   );
 }
@@ -170,12 +181,25 @@ function renderEvent(label, event, payload) {
 const PRIVATE_CHANNELS = [
   ["ORDER", `active_orders:${userId}`, ["new_open_order", "all_orders"]],
   ["TRADE", `active_trades:${userId}`, ["new_trade", "all_trades"]],
-  ["POS", `active_positions:${userId}`, ["new_positions", "all_positions"]],
+  // The server sends `updated_positions` and `update`, not `new_positions` and
+  // `portfolio_update`. channel.on() matches exactly, so the wrong name means
+  // the event is dropped in silence. Both are bound: an unused name costs
+  // nothing, and watch.py prints whatever arrives either way.
+  ["POS", `active_positions:${userId}`, ["updated_positions", "new_positions", "all_positions"]],
   ["SETTLE", `active_settlements:${userId}`, ["new_settlements", "all_settlements"]],
-  ["WALLET", `portfolio:${userId}`, ["portfolio_update", "summary"]],
+  ["WALLET", `portfolio:${userId}`, ["update", "portfolio_update", "summary"]],
 ];
 
-for (const [label, topic, events] of PRIVATE_CHANNELS) {
+// Anything passed with --topic joins on the same socket. These have no known
+// event names, so bind nothing and let the catch-all below print whatever
+// arrives, the way watch.py does for every topic.
+const EXTRA_CHANNELS = argList(args.topic).map((topic) => [
+  topic.split(":")[0].toUpperCase(),
+  topic.replace("<user_id>", userId),
+  [],
+]);
+
+for (const [label, topic, events] of [...PRIVATE_CHANNELS, ...EXTRA_CHANNELS]) {
   const isOrders = topic.startsWith("active_orders:");
 
   // cancel_on_disconnect is negotiated in the join payload of the active_orders
@@ -212,13 +236,23 @@ for (const [label, topic, events] of PRIVATE_CHANNELS) {
       console.error(`could not join ${topic}: ${JSON.stringify(reason)}`)
     );
 
+  if (events.length === 0) {
+    // channel.on() needs a name. onMessage sees every frame on this topic,
+    // which is what an unknown topic needs.
+    channel.onMessage = (event, payload) => {
+      if (!event.startsWith("phx_") && !event.startsWith("chan_")) {
+        renderEvent(label, event, payload);
+      }
+      return payload;
+    };
+  }
   for (const event of events) {
     channel.on(event, (payload) => renderEvent(label, event, payload));
   }
 }
 
 console.log(
-  `\nwatching ${market.symbol} and ${PRIVATE_CHANNELS.length} private channels` +
+  `\nwatching ${market.symbol} and ${PRIVATE_CHANNELS.length + EXTRA_CHANNELS.length} other channels` +
     (cancelOnDisconnect ? `, cancel_on_disconnect on` : "") +
     `   ctrl-c to stop\n`
 );

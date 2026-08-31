@@ -173,9 +173,20 @@ export function fail(message) {
   process.exit(1);
 }
 
-/** Parse `--flag value` and `--flag=value` alike. Returns a plain object. */
+/**
+ * Parse `--flag value` and `--flag=value` alike. Returns a plain object.
+ *
+ * A flag given once is a string; repeating it collects an array, so
+ * `--topic a --topic b` yields ["a", "b"] rather than silently keeping the
+ * last. Use `argList()` when you want the array shape either way.
+ */
 export function parseArgs(argv = process.argv.slice(2)) {
   const args = { _: [] };
+  const set = (name, value) => {
+    if (!(name in args)) args[name] = value;
+    else if (Array.isArray(args[name])) args[name].push(value);
+    else args[name] = [args[name], value];
+  };
   for (let i = 0; i < argv.length; i++) {
     const token = argv[i];
     if (!token.startsWith("--")) {
@@ -184,14 +195,20 @@ export function parseArgs(argv = process.argv.slice(2)) {
     }
     const [name, inline] = token.slice(2).split(/=(.*)/s);
     if (inline !== undefined) {
-      args[name] = inline;
+      set(name, inline);
     } else if (argv[i + 1] !== undefined && !argv[i + 1].startsWith("--")) {
-      args[name] = argv[++i];
+      set(name, argv[++i]);
     } else {
-      args[name] = true;
+      set(name, true);
     }
   }
   return args;
+}
+
+/** One parseArgs value as an array: missing -> [], single -> [value]. */
+export function argList(value) {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
 }
 
 

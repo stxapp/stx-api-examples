@@ -15,8 +15,8 @@ Python 3.9 or newer.
 ```bash
 git clone https://github.com/stxapp/stx-api-examples.git
 cd stx-api-examples
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .\.venv\Scripts\Activate.ps1
+python3 -m venv python/.venv
+source python/.venv/bin/activate   # Windows: python\.venv\Scripts\Activate.ps1
 pip install -r python/requirements.txt
 cd python
 ```

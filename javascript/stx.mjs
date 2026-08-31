@@ -194,3 +194,25 @@ export function parseArgs(argv = process.argv.slice(2)) {
   }
   return args;
 }
+
+
+// ---------------------------------------------------------------------------
+// Prices
+//
+// The two halves of the API do not agree on units. This is the one place that
+// reconciles them, so that no example has to remember which is which:
+//
+//   market.bids[0].price   "0.54"   decimal DOLLARS, sent as a string
+//   socket book level.p    "0.54"   decimal DOLLARS
+//   market.max_price       100      integer CENTS
+//   order.price            54       integer CENTS
+//
+// Orders are placed and returned in cents, so any arithmetic against the touch
+// has to convert first. `"0.54" - 10` does not throw here the way it does in
+// Python - it quietly evaluates to -9.46 and prices your order at the floor.
+// ---------------------------------------------------------------------------
+
+/** A book or quote price as the integer cents that orders are priced in. */
+export function bookPriceCents(price) {
+  return Math.round(Number(price) * 100);
+}

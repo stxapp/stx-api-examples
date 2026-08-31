@@ -1,16 +1,31 @@
 #!/usr/bin/env python3
-"""Measure the place-order to book-update round trip.
+"""Measure how long it takes to place an order and see it on the book.
 
     python python/websockets/latency.py
-    python python/websockets/latency.py --rounds 10 --market <market_id>
+    python python/websockets/latency.py --rounds 10 --market <market id or symbol>
 
-Each round places a resting limit order over REST, waits for the order book
-push that reflects it on the socket, then cancels it and waits again. It reports
-three numbers per leg:
+Picks a market with a resting book, subscribes to that market's socket topic,
+then repeats a round --rounds times (5 by default, capped at 10). Each round
+has two legs:
 
-    REST   the HTTP round trip - request out, response in
-    WS     from that response to the socket push that shows the change
-    TOTAL  the two together, which is what your quoting loop actually sees
+    place    POST   /api/v1/orders        rest a buy limit 10c under the touch
+    cancel   DELETE /api/v1/orders/<id>   take that same order back off
+
+Both legs are timed the same way - fire the HTTP call, then wait for the order
+book push that reflects it - and print one row each:
+
+    ROUND   which round, 1..--rounds
+    LEG     place or cancel, as above
+    REST    the HTTP round trip - request out, response in
+    WS      from that response to the socket push that shows the change
+    TOTAL   REST + WS, which is what your quoting loop actually sees
+
+The summary at the end averages all three columns over every leg, place and
+cancel together, and adds min, median and max of TOTAL.
+
+The order rests 10c below the best bid rather than crossing it: a fill would
+measure the matching engine instead of the book publish, and would leave a
+position behind. Every round cancels what it placed, so nothing is left open.
 
 javascript/websockets/latency.mjs is the same measurement in Node, so the two
 can be compared directly: same exchange, same market, different runtime and
@@ -39,6 +54,31 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import stx  # noqa: E402
 
 BOOK_TIMEOUT_SECONDS = 15
+
+# Every round puts a real order on a real book and takes it off again. This is a
+# measurement, not a load test, and 10 rounds is already 20 legs - well past the
+# point where more samples tell you anything new about your own network path.
+MAX_ROUNDS = 10
+DEFAULT_ROUNDS = 5
+
+# Printed on every run, to stderr alongside the profile line, so that the table
+# below explains itself to someone who never opens this file. stderr keeps it
+# out of the way when the numbers are piped somewhere.
+BANNER = """
+What this measures: how long from sending an order to seeing it on the book.
+Each round has two legs, both timed the same way - fire the HTTP call, then
+wait for the order book push that reflects it.
+
+  place    POST   /api/v1/orders        buy limit, 10c under the best bid
+  cancel   DELETE /api/v1/orders/<id>   that same order, taken back off
+
+  REST     the HTTP round trip - request out, response in
+  WS       from that response to the socket push that shows the change
+  TOTAL    REST + WS - what your quoting loop actually sees
+
+These are REAL orders. They rest below the touch so they do not fill, and every
+round cancels what it placed.
+"""
 
 
 def rounds_and_legs(rounds):
@@ -92,6 +132,24 @@ async def next_book_update(ws, timeout=BOOK_TIMEOUT_SECONDS):
             return frame[4]
 
 
+async def join_reply(ws, timeout=BOOK_TIMEOUT_SECONDS):
+    """Wait for the reply to our phx_join, which carries the opening book.
+
+    The book snapshot comes back inside this reply. `order_book_update` fires
+    only when the book CHANGES, so waiting for one of those here would block
+    for the whole timeout on any market that happens to be quiet - which is
+    most of them, most of the time.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"no join reply within {timeout}s")
+        frame = json.loads(await asyncio.wait_for(ws.recv(), timeout=remaining))
+        if frame[3] == "phx_reply":
+            return frame[4]
+
+
 async def heartbeat(ws, interval=20):
     ref = 9000
     while True:
@@ -104,7 +162,8 @@ async def run(config, private_key, market, rounds):
     headers = stx.signed_headers(private_key, config["key_id"], "GET", stx.SOCKET_PATH)
     topic = f"market:{market['market_id']}"
 
-    best_bid = market["bids"][0]["price"]
+    # The book quotes dollars, orders take cents - see stx.book_price_cents.
+    best_bid = stx.book_price_cents(market["bids"][0]["price"])
     # Well under the touch so it rests rather than fills. A fill would measure
     # the matching engine instead of the book publish, and would leave a
     # position behind.
@@ -121,7 +180,7 @@ async def run(config, private_key, market, rounds):
         keepalive = asyncio.create_task(heartbeat(ws))
         try:
             await ws.send(json.dumps(["1", "1", topic, "phx_join", {}]))
-            await next_book_update(ws)     # settle: drain the join reply and first push
+            await join_reply(ws)           # settle: drain the join reply
 
             order = None
             try:
@@ -175,7 +234,9 @@ def main():
     parser = argparse.ArgumentParser(description="Measure place -> book update latency.")
     parser.add_argument("--profile", help="profile in ~/.stx/credentials")
     parser.add_argument("--market", help="market id or symbol (default: deepest book)")
-    parser.add_argument("--rounds", type=int, default=5, help="place/cancel pairs (default 5)")
+    parser.add_argument("--rounds", type=int, default=DEFAULT_ROUNDS,
+                        help=f"place/cancel pairs (default {DEFAULT_ROUNDS}, "
+                             f"capped at {MAX_ROUNDS})")
     parser.add_argument("--force-production", action="store_true",
                         help="allow a production profile to place real orders")
     args = parser.parse_args()
@@ -194,6 +255,20 @@ def main():
 
     private_key = stx.load_private_key(config)
     print(f"[{config['profile']} -> {config['base_url']}]", file=sys.stderr)
+    print(BANNER, file=sys.stderr)
+
+    # Printed here, after the banner, so it lands directly above the "N round(s)"
+    # line it explains. Above the banner it scrolls out of view.
+    if args.rounds < 1:
+        # Zero or negative would run no legs at all and exit silently, which
+        # reads as a hang rather than as bad input.
+        print(f"NOTE: --rounds {args.rounds} is not a number of rounds; "
+              f"using {DEFAULT_ROUNDS}.\n", file=sys.stderr)
+        args.rounds = DEFAULT_ROUNDS
+    elif args.rounds > MAX_ROUNDS:
+        print(f"NOTE: --rounds {args.rounds} capped at {MAX_ROUNDS}. Each round "
+              f"places and cancels a real order on a real book.\n", file=sys.stderr)
+        args.rounds = MAX_ROUNDS
 
     try:
         market = pick_market(config, private_key, args.market)

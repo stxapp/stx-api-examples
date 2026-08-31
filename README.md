@@ -13,7 +13,7 @@ SDK; ask support for access. The full API reference lives at
 ```
 install.sh  configure  verify       set-up trio - POSIX shell, no Python or Node needed
 python/     rest/  websockets/      signed REST, live channels, latency
-javascript/ rest/  graphql/  websockets/
+javascript/ rest/  websockets/
 postman/                            REST collection, one request per route
 ```
 
@@ -37,35 +37,61 @@ repository will work.
 
 Then pick a language:
 
+#### JavaScript
+
 ```sh
 node javascript/rest/quickstart.mjs markets      # zero dependencies
+```
+
+#### Python
+
+```sh
 python python/rest/quickstart.py markets
 ```
 
-### Getting a key
+### Generating API key for STX
+
+There are two ways to get one. A key belongs to exactly one environment either
+way, and `./configure <profile>` keeps as many as you need side by side.
+
+#### Creating a key in the STX web app
 
 1. Register on the environment you will build against — for the US integration
    exchange that is [demo.stxapp.io](https://demo.stxapp.io).
 2. **Account → API Keys → Create API Key.** Choose a scope: `read_only`, or
    `read_write` to place and cancel orders.
-3. Copy the **key id** and the **private key PEM**. The private key is shown
-   once and is never stored by the exchange — lose it and you revoke the key and
-   issue another.
+3. Copy the **key id** and the **private key PEM**. The matching public key is
+   generated for you and stored on the server. The private key is shown once and
+   is never stored by the exchange. Lose it and you revoke the key and issue
+   another.
 
-Keys are Ed25519. You can also generate the pair yourself and register only the
-public half:
+Then run `./configure` and give it that **key id**. It takes the private key
+either as a path to a `.pem` file or pasted in directly; paste the PEM you just
+copied, since the exchange will not show it again.
+
+#### Generating your own key pair and registering the public key
+
+Keys are Ed25519. Instead of letting the exchange generate the pair, you can
+generate it locally and hand over only the public half, so the private key never
+leaves your machine:
 
 ```sh
+# Generates the PRIVATE key and writes it to the file. Keep it; this is what
+# signs your requests. Note that -out overwrites without asking.
 openssl genpkey -algorithm ed25519 -out ~/.stx/default.pem
-openssl pkey -in ~/.stx/default.pem -pubout        # paste this when creating the key
+
+# Derives the PUBLIC key from that file and prints it. Writes nothing and
+# creates no second key. Paste this when creating the key on the exchange.
+openssl pkey -in ~/.stx/default.pem -pubout
 ```
 
-A key belongs to exactly one environment. `./configure <profile>` keeps as many
-as you need side by side.
+Paste that public key into **Account → API Keys → Create API Key** in place of
+letting the exchange generate one. You still get a **key id** back; pair it with
+your local PEM in `./configure`.
 
-## What is here
+## Quickstart Examples
 
-### The shell trio
+### Shell: set up credentials and prove signing works
 
 Needs neither Python nor Node — just `curl` and `openssl`. On macOS the system
 `openssl` is LibreSSL, which cannot sign with Ed25519; `brew install openssl@3`
@@ -77,7 +103,13 @@ and put it first on `PATH`.
 | `./configure [profile]` | Prompts for a key id and a private key — from a `.pem` you point at, or pasted with echo off — and writes `~/.stx/credentials` plus `~/.stx/<profile>.pem`, `chmod 700` on the directory and `600` on the files. Asks before replacing a profile. Never takes key material as an argument, and never prints your private key. |
 | `./verify [profile]` | Signs `GET /api/v1/me` with `curl` and `openssl`, prints your `user_id` and `scope`. A complete signing example in 30 lines of shell. |
 
-### Python
+Run in that order, the three answer three separate questions: whether your
+machine has the runtimes and can install the dependencies, whether your key id
+and private key are stored where every example looks for them, and whether the
+exchange accepts a signature built from them. They are three scripts rather than
+one so that a failure tells you which of the three is wrong.
+
+### Python: signed REST, live channels, latency
 
 ```sh
 python python/rest/quickstart.py me | markets | orders | roundtrip
@@ -85,23 +117,22 @@ python python/websockets/watch.py [--market <id>] [--cancel-on-disconnect]
 python python/websockets/latency.py [--rounds 10]
 ```
 
-`python/stx.py` holds the host table, the profile loader and the signing
-function; the three scripts are the examples. Dependencies are pinned in
-`python/requirements.txt` — `cryptography` is not optional, because Python has
-no Ed25519 in its standard library.
+`python/stx.py` holds the host table, the profile loader, the signing function
+and the price-unit conversion; the three scripts are the examples. Dependencies
+are pinned in `python/requirements.txt` — `cryptography` is not optional,
+because Python has no Ed25519 in its standard library.
 
 `watch.py` speaks the raw Phoenix channel protocol, so you can see the frames.
 
-### JavaScript
+### JavaScript: signed REST, live channels, latency
 
 ```sh
 node javascript/rest/quickstart.mjs me | markets | orders | roundtrip
-node javascript/graphql/quickstart.mjs markets | orders
 node javascript/websockets/watch.mjs [--market <id>] [--cancel-on-disconnect]
 node javascript/websockets/latency.mjs [--rounds 10]
 ```
 
-**The REST and GraphQL examples have zero dependencies.** Node has Ed25519 in
+**The REST examples have zero dependencies.** Node has Ed25519 in
 `node:crypto` and `fetch` built in, so they run on a bare Node 20+ with nothing
 installed. The WebSocket examples use `phoenix` — the exchange's own channel
 client, which handles `join_ref` bookkeeping, the socket heartbeat and rejoining
@@ -109,7 +140,7 @@ after a reconnect — and `ws`, because Node's built-in `WebSocket` cannot set t
 handshake headers the signature travels in. Both are pinned and
 `package-lock.json` is committed: `npm ci`.
 
-### Latency
+### Latency: the same measurement in both runtimes
 
 `python/websockets/latency.py` and `javascript/websockets/latency.mjs` are the
 same measurement in two runtimes — place an order over REST, wait for the order
@@ -128,10 +159,6 @@ Two transports, and a serious integration uses both.
 - **WebSocket** at `/socket/websocket` — Phoenix channels. Order book depth,
   fills, order state changes, positions, balance. The only way to know about a
   fill promptly.
-
-GraphQL at `/api/graphql` takes the same API-key signing and is where the richer
-market queries live. It is not legacy and will be documented publicly later;
-`javascript/graphql/quickstart.mjs` shows it working.
 
 REST answers what was true when you asked. Poll it for state you can afford to
 be stale about, stream everything else, and reconcile the two on a slow cadence
@@ -170,8 +197,19 @@ though `?vsn=2.0.0` is on the URL.
 
 ### Prices
 
-Integer cents, everywhere in REST and on the socket. There are no decimal
-prices and no dollar strings.
+Two representations, and they do not agree. Orders are integer cents. Book and
+quote prices are decimal dollars, sent as strings.
+
+| where | example | unit |
+| --- | --- | --- |
+| `market.bids[i].price`, socket `level.p` | `"0.54"` | decimal dollars, as a string |
+| `market.max_price` | `100` | integer cents |
+| `order.price`, on POST and on GET | `54` | integer cents |
+
+Arithmetic against the touch has to convert first: subtracting from the raw book
+value is a `TypeError` in Python and, worse, a silent `-9.46` in JavaScript.
+`python/stx.py` and `javascript/stx.mjs` each expose one helper for it,
+`book_price_cents` and `bookPriceCents`, and every example goes through it.
 
 A market's price ceiling is its own **`max_price`**, not a fixed 99. US markets
 settle at $1, so `max_price` is 100 and quotes run 1–99. Canadian markets settle
@@ -187,8 +225,7 @@ the field is in **cents**: `price: 4650` on a $1 market returns
   `{data: [...]}`. Feed `cursor` back as `?cursor=...`; it is `null` on the last
   page.
 - `POST /api/v1/orders` returns **200**, not 201, as `{"order": {...}}`.
-- The order body is **flat**. Wrapping it in `{"user_order": {...}}`, the way the
-  GraphQL mutation takes it, returns 400.
+- The order body is **flat**. Wrapping it in `{"user_order": {...}}` returns 400.
 
 ### Credentials
 
@@ -241,14 +278,10 @@ a quiet market produces no traffic and the deadline does not care.
 
 Worth knowing before you hit them:
 
-- **`GET /api/v1/markets?status=open` also returns suspended markets**, and
-  `trading=true` is ignored as a query param. Filter on the `trading` field
-  client-side, as the examples do.
-- **`?status=OPEN` returns 400.** Status values are lowercase.
+- **`?status=OPEN` returns 400.** Status values are lowercase, and `open` is the
+  only accepted one — `?status=suspended` is a 400 as well.
 - The `market_updates` channel is documented in some places with the topic
   `market_update`, singular. It is plural.
-- The C# SDK's `Resources/README.md` — bundled into the NuGet package — still
-  names `in-api-staging.stxapp.io`, which does not resolve.
 
 ## Also in this repository
 

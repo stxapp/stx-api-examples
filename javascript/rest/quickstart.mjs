@@ -17,7 +17,7 @@
 // /api/v1 route requires a signature - there are no public REST endpoints - so
 // even `markets` needs a key. `roundtrip` needs a read_write one.
 
-import { loadProfile, signedHeaders, parseArgs, fail } from "../stx.mjs";
+import { loadProfile, signedHeaders, parseArgs, fail, bookPriceCents } from "../stx.mjs";
 
 /**
  * Send one signed request and return the decoded JSON.
@@ -82,17 +82,21 @@ async function cmdMe(config) {
 // Market data
 // ---------------------------------------------------------------------------
 
+// The endpoint's ceiling: limit=300 and limit=1000 both come back with 200.
+// Omitting limit entirely gives you 100.
+const MARKET_PAGE_LIMIT = 200;
+
 /**
  * One page of markets.
  *
  * Collections come back as {cursor, markets: [...]}, not {data: [...]}. Pass
  * the cursor back as ?cursor=... for the next page; it is null on the last.
  *
- * Known issue: ?status=open also returns suspended markets, and there is no
- * server-side "only tradeable" filter today - trading=true is ignored as a
- * query param. Filter on the `trading` field client-side, as below.
+ * `status` is lowercase: ?status=OPEN is a 400, and `open` is the only value the
+ * endpoint accepts. `trading=true` works as a query param too, though the
+ * examples filter on the `trading` field below so the raw page stays visible.
  */
-async function listMarkets(config, limit = 200) {
+async function listMarkets(config, limit = MARKET_PAGE_LIMIT) {
   const { markets } = await request(
     config,
     "GET",
@@ -117,22 +121,35 @@ async function cmdMarkets(config) {
   const markets = tradeable(open);
   if (markets.length === 0) fail("No tradeable markets right now.");
 
-  // Prices are integer cents everywhere in the REST API. A US market settles at
-  // $1, so max_price is 100 and quotes run 1-99. A Canadian market settles at
-  // $100 and max_price is 10000. Read it off the market, do not assume.
+  // Book prices arrive as decimal-dollar strings ("0.54") while max_price is
+  // integer cents (100), so both go through bookPriceCents to be shown and
+  // compared in the same unit. A US market settles at $1, so max_price is 100
+  // and quotes run 1-99. Canada settles at $100 and max_price is 10000. Read it
+  // off the market, do not assume.
+  // Symbols are back-loaded: the leg that distinguishes sibling markets
+  // (TOTAL-3_5 from TOTAL-4_5) is in the tail, and --market takes a symbol, so
+  // this column has to survive intact. TITLE is last and absorbs the slack - a
+  // narrow terminal costs you title text, never the identifier.
+  const shown = markets.slice(0, 15);
+  const symbolWidth = Math.max(...shown.map((m) => m.symbol.length));
+  const titleWidth = Math.max(20, (process.stdout.columns || 80) - symbolWidth - 26);
+
   console.log(
-    `${"SYMBOL".padEnd(28)} ${"BID".padStart(7)} ${"OFFER".padStart(7)} ${"MAX".padStart(7)}  TITLE`
+    `${"SYMBOL".padEnd(symbolWidth)} ${"BID".padStart(7)} ${"OFFER".padStart(7)} ${"MAX".padStart(7)}  TITLE`
   );
-  for (const market of markets.slice(0, 15)) {
-    const bid = market.bids?.[0] ? `${market.bids[0].price}c` : "-";
-    const offer = market.offers?.[0] ? `${market.offers[0].price}c` : "-";
+  for (const market of shown) {
+    const bid = market.bids?.[0] ? `${bookPriceCents(market.bids[0].price)}c` : "-";
+    const offer = market.offers?.[0] ? `${bookPriceCents(market.offers[0].price)}c` : "-";
     console.log(
-      `${market.symbol.slice(0, 28).padEnd(28)} ${bid.padStart(7)} ${offer.padStart(7)} ` +
-        `${`${market.max_price}c`.padStart(7)}  ${(market.title ?? "").slice(0, 40)}`
+      `${market.symbol.padEnd(symbolWidth)} ${bid.padStart(7)} ${offer.padStart(7)} ` +
+        `${`${market.max_price}c`.padStart(7)}  ${(market.title ?? "").slice(0, titleWidth)}`
     );
   }
 
-  console.log(`\n${markets.length} tradeable of ${open.length} returned by ?status=open.`);
+  console.log(
+    `\n${markets.length} tradeable of ${open.length} returned by ` +
+      `?status=open&limit=${MARKET_PAGE_LIMIT}.`
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -176,7 +193,8 @@ async function cmdRoundtrip(config, args) {
   const market = tradeable(await listMarkets(config)).find((m) => m.bids?.length > 0);
   if (!market) fail("No tradeable market with a bid to price against.");
 
-  const bestBid = market.bids[0].price;
+  // The book quotes dollars, orders take cents - see bookPriceCents.
+  const bestBid = bookPriceCents(market.bids[0].price);
 
   // Ten cents under the touch, floored at 1c. The ceiling is the market's own
   // max_price, and the rejection message reports it in DOLLARS while the field

@@ -20,6 +20,7 @@ python/.venv.
 
 import argparse
 import os
+import shutil
 import sys
 import time
 
@@ -94,15 +95,20 @@ def cmd_me(config, private_key, _args):
 # ---------------------------------------------------------------------------
 
 
-def list_markets(config, private_key, limit=200):
+# The endpoint's ceiling: limit=300 and limit=1000 both come back with 200.
+# Omitting limit entirely gives you 100.
+MARKET_PAGE_LIMIT = 200
+
+
+def list_markets(config, private_key, limit=MARKET_PAGE_LIMIT):
     """One page of markets.
 
     Collections come back as {"cursor": ..., "markets": [...]}, not {"data": ...}.
     Pass the cursor back as ?cursor=... for the next page; it is null on the last.
 
-    Known issue: ?status=open also returns suspended markets, and there is no
-    server-side "only tradeable" filter today - trading=true is ignored as a
-    query param. Filter on the `trading` field client-side, as below.
+    `status` is lowercase: ?status=OPEN is a 400, and `open` is the only value
+    the endpoint accepts. `trading=true` works as a query param too, though the
+    examples filter on the `trading` field below so the raw page stays visible.
     """
     path = f"/api/v1/markets?status=open&limit={limit}"
     return request(config, private_key, "GET", path)["markets"]
@@ -121,21 +127,32 @@ def cmd_markets(config, private_key, _args):
     if not markets:
         sys.exit("No tradeable markets right now.")
 
-    # Prices are integer cents everywhere in the REST API. A US market settles
-    # at $1, so max_price is 100 and quotes run 1-99. A Canadian market settles
-    # at $100 and max_price is 10000. Read it off the market, do not assume.
-    print(f"{'SYMBOL':<28} {'BID':>7} {'OFFER':>7} {'MAX':>7}  TITLE")
-    for market in markets[:15]:
+    # Book prices arrive as decimal-dollar strings ("0.54") while max_price is
+    # integer cents (100), so both go through stx.book_price_cents to be shown
+    # and compared in the same unit. A US market settles at $1, so max_price is
+    # 100 and quotes run 1-99. Canada settles at $100 and max_price is 10000.
+    # Read it off the market, do not assume.
+    # Symbols are back-loaded: the leg that distinguishes sibling markets
+    # (TOTAL-3_5 from TOTAL-4_5) is in the tail, and --market takes a symbol,
+    # so this column has to survive intact. TITLE is last and absorbs the
+    # slack - a narrow terminal costs you title text, never the identifier.
+    shown = markets[:15]
+    symbol_width = max(len(m["symbol"]) for m in shown)
+    title_width = max(20, shutil.get_terminal_size().columns - symbol_width - 26)
+
+    print(f"{'SYMBOL':<{symbol_width}} {'BID':>7} {'OFFER':>7} {'MAX':>7}  TITLE")
+    for market in shown:
         bids = market.get("bids") or []
         offers = market.get("offers") or []
-        bid = f"{bids[0]['price']}c" if bids else "-"
-        offer = f"{offers[0]['price']}c" if offers else "-"
+        bid = f"{stx.book_price_cents(bids[0]['price'])}c" if bids else "-"
+        offer = f"{stx.book_price_cents(offers[0]['price'])}c" if offers else "-"
         print(
-            f"{market['symbol'][:28]:<28} {bid:>7} {offer:>7} "
-            f"{str(market['max_price']) + 'c':>7}  {(market.get('title') or '')[:40]}"
+            f"{market['symbol']:<{symbol_width}} {bid:>7} {offer:>7} "
+            f"{str(market['max_price']) + 'c':>7}  {(market.get('title') or '')[:title_width]}"
         )
 
-    print(f"\n{len(markets)} tradeable of {len(open_markets)} returned by ?status=open.")
+    print(f"\n{len(markets)} tradeable of {len(open_markets)} returned by "
+          f"?status=open&limit={MARKET_PAGE_LIMIT}.")
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +194,8 @@ def cmd_roundtrip(config, private_key, args):
         sys.exit("No tradeable market with a bid to price against.")
 
     market = candidates[0]
-    best_bid = market["bids"][0]["price"]
+    # The book quotes dollars, orders take cents - see stx.book_price_cents.
+    best_bid = stx.book_price_cents(market["bids"][0]["price"])
 
     # Ten cents under the touch, floored at 1c. The ceiling is the market's own
     # max_price, and the rejection message reports it in DOLLARS while the field

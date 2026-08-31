@@ -5,13 +5,13 @@ request signing, market data, order placement, live order books over WebSocket,
 and a latency measurement you can run against your own connection.
 
 **This is example code, not a client library.** It is deliberately plain and
-copyable — each script reads top to bottom and shows what goes on the wire. If
+copyable: each script reads top to bottom and shows what goes on the wire. If
 you want a maintained client instead, use **`pysdk`**, the supported STX Python
 SDK; ask support for access. The full API reference lives at
 [docs.stxapp.io](https://docs.stxapp.io).
 
 ```
-install.sh  configure  verify       set-up trio - POSIX shell, no Python or Node needed
+install.sh  configure  verify       setup and signing check - POSIX shell only
 python/     rest/  websockets/      signed REST, live channels, latency
 javascript/ rest/  websockets/
 postman/                            REST collection, one request per route
@@ -56,7 +56,7 @@ way, and `./configure <profile>` keeps as many as you need side by side.
 
 #### Creating a key in the STX web app
 
-1. Register on the environment you will build against — for the US integration
+1. Register on the environment you will build against. For the US integration
    exchange that is [demo.stxapp.io](https://demo.stxapp.io).
 2. **Account → API Keys → Create API Key.** Choose a scope: `read_only`, or
    `read_write` to place and cancel orders.
@@ -93,14 +93,14 @@ your local PEM in `./configure`.
 
 ### Shell: set up credentials and prove signing works
 
-Needs neither Python nor Node — just `curl` and `openssl`. On macOS the system
+Needs neither Python nor Node, just `curl` and `openssl`. On macOS the system
 `openssl` is LibreSSL, which cannot sign with Ed25519; `brew install openssl@3`
 and put it first on `PATH`.
 
 | | |
 | --- | --- |
 | `./install.sh` | Detects which runtimes are present and sets up only those, inside this directory. Nothing is installed globally. Prints what it set up and what it skipped. |
-| `./configure [profile]` | Prompts for a key id and a private key — from a `.pem` you point at, or pasted with echo off — and writes `~/.stx/credentials` plus `~/.stx/<profile>.pem`, `chmod 700` on the directory and `600` on the files. Asks before replacing a profile. Never takes key material as an argument, and never prints your private key. |
+| `./configure [profile]` | Prompts for a key id and a private key (from a `.pem` you point at, or pasted with echo off) and writes `~/.stx/credentials` plus `~/.stx/<profile>.pem`, `chmod 700` on the directory and `600` on the files. Asks before replacing a profile. Never takes key material as an argument, and never prints your private key. |
 | `./verify [profile]` | Signs `GET /api/v1/me` with `curl` and `openssl`, prints your `user_id` and `scope`. A complete signing example in 30 lines of shell. |
 
 Run in that order, the three answer three separate questions: whether your
@@ -119,7 +119,7 @@ python python/websockets/latency.py [--rounds 10]
 
 `python/stx.py` holds the host table, the profile loader, the signing function
 and the price-unit conversion; the three scripts are the examples. Dependencies
-are pinned in `python/requirements.txt` — `cryptography` is not optional,
+are pinned in `python/requirements.txt`. `cryptography` is not optional,
 because Python has no Ed25519 in its standard library.
 
 `watch.py` speaks the raw Phoenix channel protocol, so you can see the frames.
@@ -134,17 +134,17 @@ node javascript/websockets/latency.mjs [--rounds 10]
 
 **The REST examples have zero dependencies.** Node has Ed25519 in
 `node:crypto` and `fetch` built in, so they run on a bare Node 20+ with nothing
-installed. The WebSocket examples use `phoenix` — the exchange's own channel
+installed. The WebSocket examples use `phoenix` (the exchange's own channel
 client, which handles `join_ref` bookkeeping, the socket heartbeat and rejoining
-after a reconnect — and `ws`, because Node's built-in `WebSocket` cannot set the
+after a reconnect) and `ws`, because Node's built-in `WebSocket` cannot set the
 handshake headers the signature travels in. Both are pinned and
 `package-lock.json` is committed: `npm ci`.
 
 ### Latency: the same measurement in both runtimes
 
 `python/websockets/latency.py` and `javascript/websockets/latency.mjs` are the
-same measurement in two runtimes — place an order over REST, wait for the order
-book push that reflects it, cancel, wait again — so you can compare runtime and
+same measurement in two runtimes (place an order over REST, wait for the order
+book push that reflects it, cancel, wait again), so you can compare runtime and
 library overhead on your own network path before choosing one.
 
 They place **real orders**, priced to rest rather than fill, and refuse a
@@ -154,15 +154,15 @@ production profile unless `--force-production` is passed.
 
 Two transports, and a serious integration uses both.
 
-- **REST** at `/api/v1` — orders, market and event discovery, your own trades,
+- **REST** at `/api/v1`: orders, market and event discovery, your own trades,
   positions and settlements. This is the documented surface.
-- **WebSocket** at `/socket/websocket` — Phoenix channels. Order book depth,
+- **WebSocket** at `/socket/websocket`: Phoenix channels. Order book depth,
   fills, order state changes, positions, balance. The only way to know about a
   fill promptly.
 
 REST answers what was true when you asked. Poll it for state you can afford to
-be stale about, stream everything else, and reconcile the two on a slow cadence
-— a dropped socket message on a live connection is silent.
+be stale about, stream everything else, and reconcile the two on a slow cadence.
+A dropped socket message on a live connection is silent.
 
 ### Signing
 
@@ -185,8 +185,8 @@ timestamp_ms + HTTP_METHOD_UPPERCASE + path
 - The path **includes its query string** exactly as sent, and never the scheme or
   host. Signing `/api/v1/markets` and sending `/api/v1/markets?status=open` is a
   401.
-- Plain Ed25519 (RFC 8032) over the UTF-8 bytes — **not** `Ed25519ph`, no
-  pre-hashing — base64 with the standard alphabet and padding, not URL-safe.
+- Plain Ed25519 (RFC 8032) over the UTF-8 bytes, **not** `Ed25519ph` and no
+  pre-hashing. Base64 with the standard alphabet and padding, not URL-safe.
 - The timestamp must be within **30 seconds** of the server clock. Generate it
   per request and keep the machine on NTP; a clock a minute fast fails every
   request with a 401 that looks exactly like a bad key.
@@ -206,10 +206,15 @@ quote prices are decimal dollars, sent as strings.
 | `market.max_price` | `100` | integer cents |
 | `order.price`, on POST and on GET | `54` | integer cents |
 
-Arithmetic against the touch has to convert first: subtracting from the raw book
-value is a `TypeError` in Python and, worse, a silent `-9.46` in JavaScript.
-`python/stx.py` and `javascript/stx.mjs` each expose one helper for it,
-`book_price_cents` and `bookPriceCents`, and every example goes through it.
+This means a price read off the book cannot go straight into an order. Say the
+best bid is `"0.54"` and you want to rest an order ten cents below it, at 44c.
+Subtracting from that string raises a `TypeError` in Python. JavaScript is worse,
+because it coerces instead of complaining: `"0.54" - 10` is `-9.46`, which clamps
+to a 1c order rather than the 44c one you meant, and nothing tells you.
+
+Convert to cents first. `python/stx.py` and `javascript/stx.mjs` each expose one
+helper for exactly this, `book_price_cents` and `bookPriceCents`, and every
+example here goes through it.
 
 A market's price ceiling is its own **`max_price`**, not a fixed 99. US markets
 settle at $1, so `max_price` is 100 and quotes run 1–99. Canadian markets settle
@@ -221,11 +226,13 @@ the field is in **cents**: `price: 4650` on a $1 market returns
 
 ### Response shapes
 
-- A collection is `{cursor, <resource>: [...]}` — `{cursor, orders: [...]}`, not
+- A collection is `{cursor, <resource>: [...]}`, so `{cursor, orders: [...]}`, not
   `{data: [...]}`. Feed `cursor` back as `?cursor=...`; it is `null` on the last
   page.
 - `POST /api/v1/orders` returns **200**, not 201, as `{"order": {...}}`.
-- The order body is **flat**. Wrapping it in `{"user_order": {...}}` returns 400.
+- The order body is **flat**. Wrapping it in `{"user_order": {...}}` returns 400
+  with `{"error":"market_id is required"}`, which points at the wrong problem:
+  the field is there, just one level down.
 
 ### Credentials
 
@@ -241,23 +248,35 @@ private_key = /home/you/.stx/default.pem
 ```
 
 Hostnames are deliberately absent: `exchange` and `environment` are resolved
-through a single table per language — `python/stx.py`, `javascript/stx.mjs`, and
-the `base_url()` function in `verify` — so no script contains a hostname.
+through a single table per language (`python/stx.py`, `javascript/stx.mjs`, and
+the `base_url()` function in `verify`), so no script contains a hostname.
 
 | exchange | environment | |
 | --- | --- | --- |
 | `us` | `integration` | `demo.stxapp.io` |
 | `ca` | `integration` | `api-staging.on.sportsxapp.com` |
-| `ca` | `production` | `api.on.stxapp.ca` — real money |
+| `ca` | `production` | `api.on.stxapp.ca` (real money) |
 
-Any value can be overridden by an environment variable, which is what you want
-in CI: `STX_PROFILE`, `STX_EXCHANGE`, `STX_ENVIRONMENT`, `STX_KEY_ID`,
-`STX_PRIVATE_KEY`.
+Environment variables override the file. Two of them are enough to run the
+Python and JavaScript examples with no `~/.stx/credentials` at all:
+
+```sh
+STX_KEY_ID=<your key id> STX_PRIVATE_KEY=~/.stx/default.pem \
+  python python/rest/quickstart.py me
+```
+
+`STX_PRIVATE_KEY` is the path to the PEM, not its contents. The other three are
+optional and only override what the table above resolves: `STX_PROFILE`,
+`STX_EXCHANGE` and `STX_ENVIRONMENT`, defaulting to `default`, `us` and
+`integration`.
+
+`./configure` and `./verify` read only `STX_DIR` and take everything else from
+the file, so `./verify` ignores a `STX_KEY_ID` you set for the examples.
 
 ### Your user id
 
-Private WebSocket topics are scoped by user id — `active_orders:<user_id>`,
-`portfolio:<user_id>` — and `GET /api/v1/me` is the only place it is published.
+Private WebSocket topics are scoped by user id (`active_orders:<user_id>`,
+`portfolio:<user_id>`), and `GET /api/v1/me` is the only place it is published.
 Fetch it once at startup and hold it; `./verify` prints it too.
 
 ### Two socket timers, not one
@@ -271,7 +290,7 @@ wrong by hand:
 | `cancel_on_disconnect` | a `ping` on the `active_orders` topic | 5000–20000 ms, whatever you negotiated at join | **your flagged orders are cancelled** on a connection that is still up |
 
 A 30-second heartbeat keeps the socket alive and still blows the `ping`
-deadline. Send the channel `ping` on its own timer, not in response to traffic —
+deadline. Send the channel `ping` on its own timer, not in response to traffic:
 a quiet market produces no traffic and the deadline does not care.
 
 ## Known issues
@@ -279,7 +298,7 @@ a quiet market produces no traffic and the deadline does not care.
 Worth knowing before you hit them:
 
 - **`?status=OPEN` returns 400.** Status values are lowercase, and `open` is the
-  only accepted one — `?status=suspended` is a 400 as well.
+  only accepted one; `?status=suspended` is a 400 as well.
 - The `market_updates` channel is documented in some places with the topic
   `market_update`, singular. It is plural.
 
@@ -306,4 +325,4 @@ you scale.
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE).

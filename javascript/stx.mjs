@@ -8,8 +8,8 @@
 //   signedHeaders() the Ed25519 signing scheme, in about ten lines.
 //
 // Zero dependencies: Node has Ed25519 in node:crypto and fetch built in, so
-// nothing here or in the REST and GraphQL examples needs npm at all. Only the
-// WebSocket examples pull in packages.
+// nothing here or in the REST examples needs npm at all. Only the WebSocket
+// examples pull in packages.
 
 import { createPrivateKey, sign } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
@@ -40,7 +40,6 @@ export const SOCKET_PATH = "/socket/websocket";
 // hand it. Give it SOCKET_PATH and you connect to /socket/websocket/websocket,
 // which is a 404 at the handshake and shows up as an endless reconnect loop.
 export const SOCKET_ENDPOINT = "/socket";
-export const GRAPHQL_PATH = "/api/graphql";
 
 const CREDENTIALS_PATH =
   process.env.STX_CREDENTIALS || join(homedir(), ".stx", "credentials");

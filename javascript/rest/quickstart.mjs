@@ -205,9 +205,8 @@ async function cmdRoundtrip(config, args) {
   console.log(`${market.symbol}  best bid ${bestBid}c, max_price ${market.max_price}c`);
   console.log(`placing    BUY 1 @ ${price}c`);
 
-  // The body is flat. Wrapping it in {user_order: {...}}, the way the GraphQL
-  // mutation takes it, returns 400. And a successful placement is a 200, not a
-  // 201.
+  // The body is flat. Wrapping it in {user_order: {...}} returns 400. And a
+  // successful placement is a 200, not a 201.
   const { order } = await request(config, "POST", "/api/v1/orders", {
     market_id: market.market_id,
     order_type: "limit",

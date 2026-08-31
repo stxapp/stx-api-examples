@@ -10,7 +10,7 @@
 //   node javascript/rest/quickstart.mjs roundtrip
 //
 // Needs `./install.sh` (or `npm install` in javascript/) for the phoenix and ws
-// packages. The REST and GraphQL examples need neither.
+// packages. The REST examples need neither.
 //
 // This uses the official `phoenix` npm client rather than talking the channel
 // protocol by hand. It is worth the dependency: it owns join_ref bookkeeping,

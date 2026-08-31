@@ -21,10 +21,11 @@
 // queries live, and it will be documented publicly later. Two caveats worth
 // knowing before you mix them:
 //
-//   1. Money is not necessarily represented the same way on both. REST is
-//      integer cents throughout; the GraphQL schema serialises some money
-//      fields differently. Do not carry a number from one to the other without
-//      checking what it is.
+//   1. Money is not necessarily represented the same way on both. It varies
+//      within REST alone - orders are integer cents, book prices are decimal
+//      dollar strings, which is what bookPriceCents in ../stx.mjs reconciles -
+//      and the GraphQL schema serialises some money fields differently again.
+//      Do not carry a number from one to the other without checking what it is.
 //   2. The GraphQL schema is not published yet, so introspect the endpoint
 //      (/graphiql on an integration host) rather than working from a copy.
 
@@ -85,11 +86,19 @@ async function cmdMarkets(config) {
     return;
   }
 
-  console.log(`${"SYMBOL".padEnd(28)} ${"STATUS".padEnd(10)} ${"TRADING".padEnd(8)} TITLE`);
+  // Symbols are back-loaded: the leg that distinguishes sibling markets
+  // (TOTAL-3_5 from TOTAL-4_5) is in the tail, so this column has to survive
+  // intact. TITLE is last and absorbs the slack.
+  const symbolWidth = Math.max(...marketInfos.map((m) => (m.symbol ?? "").length));
+  const titleWidth = Math.max(20, (process.stdout.columns || 80) - symbolWidth - 21);
+
+  console.log(
+    `${"SYMBOL".padEnd(symbolWidth)} ${"STATUS".padEnd(10)} ${"TRADING".padEnd(8)} TITLE`
+  );
   for (const market of marketInfos) {
     console.log(
-      `${(market.symbol ?? "").slice(0, 28).padEnd(28)} ${String(market.status).padEnd(10)} ` +
-        `${String(market.trading).padEnd(8)} ${(market.title ?? "").slice(0, 40)}`
+      `${(market.symbol ?? "").padEnd(symbolWidth)} ${String(market.status).padEnd(10)} ` +
+        `${String(market.trading).padEnd(8)} ${(market.title ?? "").slice(0, titleWidth)}`
     );
   }
   console.log(`\n${marketInfos.length} markets. Same data as GET /api/v1/markets, different shape.`);

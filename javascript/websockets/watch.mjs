@@ -21,7 +21,7 @@
 
 import { Socket } from "phoenix";
 import WebSocket from "ws";
-import { loadProfile, signedHeaders, parseArgs, fail, SOCKET_PATH } from "../stx.mjs";
+import { loadProfile, signedHeaders, parseArgs, fail, SOCKET_PATH, bookPriceCents } from "../stx.mjs";
 
 // Two independent timers, and the socket heartbeat only resets one of them.
 //
@@ -117,8 +117,8 @@ const stamp = () => new Date().toISOString().slice(11, 19);
 function renderBook(payload) {
   const bids = payload?.ob?.b ?? [];
   const offers = payload?.ob?.o ?? [];
-  const bid = bids[0] ? `${String(bids[0].q).padStart(6)} @ ${String(bids[0].p).padStart(4)}c` : " ".repeat(14);
-  const offer = offers[0] ? `${String(offers[0].p).padEnd(4)}c @ ${String(offers[0].q).padEnd(6)}` : "";
+  const bid = bids[0] ? `${String(bids[0].q).padStart(6)} @ ${String(bookPriceCents(bids[0].p)).padStart(4)}c` : " ".repeat(14);
+  const offer = offers[0] ? `${`${bookPriceCents(offers[0].p)}c`.padEnd(5)} @ ${String(offers[0].q).padEnd(6)}` : "";
   console.log(`${stamp()}  BOOK   ${bid}   |   ${offer}   (${bids.length}x${offers.length} levels)`);
 }
 

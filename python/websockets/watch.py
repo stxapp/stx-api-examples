@@ -132,8 +132,8 @@ async def order_pings(ws, topic, join_ref, ping_timeout_ms):
 def render_book(payload):
     book = payload["ob"]
     bids, offers = book.get("b") or [], book.get("o") or []
-    bid = f"{bids[0]['q']:>6} @ {bids[0]['p']:>4}c" if bids else " " * 14
-    offer = f"{offers[0]['p']:<4}c @ {offers[0]['q']:<6}" if offers else ""
+    bid = f"{bids[0]['q']:>6} @ {stx.book_price_cents(bids[0]['p']):>4}c" if bids else " " * 14
+    offer = f"{str(stx.book_price_cents(offers[0]['p'])) + 'c':<5} @ {offers[0]['q']:<6}" if offers else ""
     print(f"{stamp()}  BOOK   {bid}   |   {offer}   ({len(bids)}x{len(offers)} levels)")
 
 

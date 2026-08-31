@@ -136,3 +136,31 @@ def signed_headers(private_key, key_id, method, path):
         "X-STX-ACCESS-TIMESTAMP": timestamp,
         "X-STX-ACCESS-SIGNATURE": signature,
     }
+
+
+# ---------------------------------------------------------------------------
+# Prices
+#
+# The two halves of the API do not agree on units. This is the one place that
+# reconciles them, so that no example has to remember which is which:
+#
+#   market["bids"][0]["price"]   "0.54"   decimal DOLLARS, sent as a string
+#   socket book level["p"]       "0.54"   decimal DOLLARS
+#   market["max_price"]          100      integer CENTS
+#   order["price"]               54       integer CENTS
+#
+# Orders are placed and returned in cents, so any arithmetic against the touch
+# has to convert first. Subtracting from the raw book value is a TypeError in
+# Python and, worse, a silent -9.46 in JavaScript.
+# ---------------------------------------------------------------------------
+
+
+def book_price_cents(price):
+    """A book or quote price as the integer cents that orders are priced in.
+
+    Rounds halves up rather than to even, so that this agrees with
+    ``bookPriceCents`` in javascript/stx.mjs on a tie - the two runtimes are
+    meant to be directly comparable. Prices are never negative, so adding a
+    half and truncating is a half-up round.
+    """
+    return int(float(price) * 100 + 0.5)

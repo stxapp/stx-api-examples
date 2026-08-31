@@ -23,7 +23,15 @@ import shutil
 import sys
 import time
 
-import requests
+try:
+    import requests
+except ModuleNotFoundError as error:
+    # ./verify runs on curl and openssl, so setup can look complete while the
+    # virtualenv is not active - most often in a terminal opened later.
+    raise SystemExit(
+        f"{error.name} is not installed. Activate the virtualenv ./install.sh made:\n"
+        f"  source python/.venv/bin/activate"
+    ) from None
 
 # stx.py sits in python/: the host table, the profile loader and the signing
 # scheme, shared by every Python example here so that a hostname and a signature

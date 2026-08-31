@@ -55,16 +55,17 @@ python python/websockets/watch.py \
   --topic 'active_orders:2b7f41ac-95d0-4e18-b3c6-8a1f0d572e34'
 ```
 
-Frames arrive exactly as the server sends them, so a channel with no special
-handling anywhere still shows its events:
+It prints both directions: the join frame it sends, marked `->`, then every
+frame that comes back, marked `<-` and unformatted. What this page documents is
+literally what goes on the wire.
 
 ```
-joining markets
-joining portfolio:<user_id>
+16:39:55  markets            -> ["0","0","markets","phx_join",{}]
+16:39:55  portfolio          -> ["1","1","portfolio:<user_id>","phx_join",{}]
 
-16:25:05  markets            <- phx_reply  {"status":"ok","response":{ ... }}
-16:25:05  portfolio          <- phx_reply  {"status":"ok","response":{}}
-16:25:05  portfolio          <- summary  {"available_balance":1000073, ... }
+16:39:55  markets            <- phx_reply  {"status":"ok","response":{ ... }}
+16:39:55  portfolio          <- phx_reply  {"status":"ok","response":{}}
+16:39:55  portfolio          <- summary  {"available_balance":1000073, ... }
 ```
 
 ## Two timers, not one
@@ -171,8 +172,35 @@ The join reply describes the server-side filtering it supports:
 
 `available_rules` lists around sixty market rules. Pass filters in the join
 payload and the server pushes only what you asked for, rather than every market
-change. The exact filter keys are not published; the reply above is the whole of
-what the API tells you about them.
+change:
+
+```json
+["1", "1", "markets", "phx_join",
+ {"rule_filters": ["home_winner"], "message_types": ["market_updated"]}]
+```
+
+```sh
+python python/websockets/watch_channel.py --topic markets \
+  --payload '{"rule_filters": ["home_winner"], "message_types": ["market_updated"]}'
+```
+
+which the server confirms by echoing back what it accepted:
+
+```json
+{"selected_rule_filters": ["home_winner"],
+ "selected_message_types": ["market_updated"]}
+```
+
+**The keys you send are not the keys you get back.** Send `rule_filters` and
+`message_types`; the reply reports them as `selected_rule_filters` and
+`selected_message_types`. Sending the `selected_` names is accepted and then
+ignored.
+
+Read that echo, because nothing here fails loudly. A misspelled rule, an event
+name that does not exist, or a bare string where an array belongs are all
+dropped in silence, and the reply comes back with `selected_rule_filters: null`,
+meaning no filter at all. You asked to narrow the stream and quietly got every
+market instead. The defaults are `null` rules and both message types.
 
 Events are `market_updated` and `market_created`. The payload is keyed by market
 id rather than being a flat object:

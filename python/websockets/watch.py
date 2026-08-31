@@ -32,8 +32,16 @@ import os
 import sys
 from datetime import datetime
 
-import requests
-import websockets
+try:
+    import requests
+    import websockets
+except ModuleNotFoundError as error:
+    # ./verify runs on curl and openssl, so setup can look complete while the
+    # virtualenv is not active - most often in a terminal opened later.
+    raise SystemExit(
+        f"{error.name} is not installed. Activate the virtualenv ./install.sh made:\n"
+        f"  source python/.venv/bin/activate"
+    ) from None
 
 # stx.py sits in python/. Appended rather than prepended so this directory
 # (python/websockets/) cannot shadow the installed `websockets` package.

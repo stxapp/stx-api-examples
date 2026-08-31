@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b7f1c0de-0000-4000-8000-5f7a9b1c2d00",
     "name": "STX REST API (/api/v1)",
-    "description": "The STX exchange REST API.\n\nEvery route requires an Ed25519 signature - there are no public REST endpoints. Postman's script sandbox has no Ed25519 implementation, so the signature cannot be computed here: set the `timestamp` and `signature` collection variables per request with the openssl one-liner in postman/README.md, or use ./verify, javascript/rest/quickstart.mjs or python/rest/quickstart.py, which sign for you.\n\nPrices are integer cents throughout. A market's ceiling is its own max_price (100 on a US $1 market, 10000 on a Canadian $100 market), not a fixed 99.",
+    "description": "The STX exchange REST API.\n\nEvery route requires an Ed25519 signature. Postman's script sandbox has no Ed25519 implementation, so the signature cannot be computed here: set the `timestamp` and `signature` collection variables per request with the openssl one-liner in postman/README.md, or use ./verify, javascript/rest/quickstart.mjs or python/rest/quickstart.py, which sign for you.\n\nPrices use two representations. Orders take integer cents (`price: 54`), and that is what GET /api/v1/orders returns. Book and quote prices come back as decimal-dollar strings (`\"0.54\"`), so convert before doing arithmetic against the touch. A market's ceiling is its own max_price in cents (100 on a US $1 market, 10000 on a Canadian $100 market), not a fixed 99.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [

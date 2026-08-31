@@ -101,8 +101,8 @@ def load_private_key(config):
 # ---------------------------------------------------------------------------
 # Signing
 #
-# Three headers on every /api/v1 call. There are no public REST endpoints, so
-# this runs on every request you will ever make.
+# Three headers on every /api/v1 call. Every route needs them, so this runs on
+# every request you will ever make.
 #
 #     X-STX-ACCESS-KEY         your key id
 #     X-STX-ACCESS-TIMESTAMP   Unix milliseconds, as a string

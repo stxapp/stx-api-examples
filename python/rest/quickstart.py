@@ -11,8 +11,7 @@ Add ``--profile <name>`` to use a profile other than ``[default]``:
     python python/rest/quickstart.py --profile ca-integration markets
 
 Credentials come from ~/.stx/credentials, written by ``./configure``. Every
-/api/v1 route requires a signature - there are no public REST endpoints - so
-even ``markets`` needs a key. ``roundtrip`` needs a ``read_write`` one.
+/api/v1 route requires a signature, so even ``markets`` needs a key. ``roundtrip`` needs a ``read_write`` one.
 
 Requires the packages in python/requirements.txt; ``./install.sh`` puts them in
 python/.venv.

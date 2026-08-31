@@ -6,8 +6,8 @@ set `base_url` and `key_id` in the collection variables.
 
 ## Postman cannot sign for you
 
-Every `/api/v1` route requires an Ed25519 signature (there are no public REST
-endpoints), and **Postman's script sandbox has no Ed25519 implementation**. There
+Every `/api/v1` route requires an Ed25519 signature, and **Postman's script
+sandbox has no Ed25519 implementation**. There
 is no pre-request script that can produce a valid signature without embedding a
 hand-written Ed25519 into the collection, which is not something to put in an
 example you are meant to trust.

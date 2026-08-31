@@ -132,3 +132,12 @@ echo
 echo "Next:"
 echo "  ./configure     # store your key id and private key in ~/.stx/"
 echo "  ./verify        # sign GET /api/v1/me and print who you are"
+
+# ./verify runs on curl and openssl, so it passes whether or not the virtualenv
+# is active. Without this line the next thing anyone does is run a Python
+# example against the system interpreter and get ModuleNotFoundError.
+if [ -d python/.venv ]; then
+    echo
+    echo "For the Python examples, activate the virtualenv first:"
+    echo "  source python/.venv/bin/activate      # Windows: python\.venv\Scripts\Activate.ps1"
+fi

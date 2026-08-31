@@ -14,6 +14,12 @@ what you want when working through CHANNELS.md one channel at a time.
     python python/websockets/watch_channel.py \\
         --topic markets --topic 'portfolio:<user_id>'
 
+`--payload` sets the join payload, which the markets channel uses for
+server-side filtering:
+
+    python python/websockets/watch_channel.py --topic markets \\
+        --payload '{"rule_filters": ["home_winner"]}'
+
 Requires the packages in python/requirements.txt; ``./install.sh`` puts them in
 python/.venv.
 """
@@ -25,8 +31,16 @@ import os
 import sys
 import time
 
-import requests
-import websockets
+try:
+    import requests
+    import websockets
+except ModuleNotFoundError as error:
+    # ./verify runs on curl and openssl, so setup can look complete while the
+    # virtualenv is not active - most often in a terminal opened later.
+    raise SystemExit(
+        f"{error.name} is not installed. Activate the virtualenv ./install.sh made:\n"
+        f"  source python/.venv/bin/activate"
+    ) from None
 
 # stx.py sits in python/. Appended rather than prepended so this directory
 # (python/websockets/) cannot shadow the installed `websockets` package.
@@ -43,6 +57,12 @@ def stamp():
     return time.strftime("%H:%M:%S")
 
 
+def label(topic):
+    """The topic's prefix, padded. The full topic is on the join frame above;
+    repeating a user id on every line only makes them unreadable."""
+    return f"{topic.split(':')[0]:<18}"
+
+
 async def heartbeat(ws):
     """`[null, ref, "phoenix", "heartbeat", {}]`, on its own timer."""
     ref = 0
@@ -52,7 +72,7 @@ async def heartbeat(ws):
         await ws.send(json.dumps([None, str(ref), "phoenix", "heartbeat", {}]))
 
 
-async def watch(config, private_key, topics):
+async def watch(config, private_key, topics, join_payload):
     # The handshake signs GET against /socket/websocket with the query string
     # DROPPED - `?vsn=2.0.0` is on the URL but not in the signed message.
     headers = stx.signed_headers(private_key, config["key_id"], "GET", stx.SOCKET_PATH)
@@ -65,18 +85,20 @@ async def watch(config, private_key, topics):
             for index, topic in enumerate(topics):
                 # [join_ref, ref, topic, event, payload]. Every later message to
                 # this topic must repeat the same join_ref.
-                await ws.send(json.dumps([str(index), str(index), topic, "phx_join", {}]))
-                print(f"joining {topic}")
+                frame = [str(index), str(index), topic, "phx_join", join_payload]
+                await ws.send(json.dumps(frame, separators=(",", ":")))
+                # Echo the frame we just sent. It is the whole point of this
+                # script: what CHANNELS.md documents is literally what goes out.
+                print(f"{stamp()}  {label(topic)} -> "
+                      f"{json.dumps(frame, separators=(',', ':'))}")
             print()
 
             while True:
                 join_ref, ref, topic, event, payload = json.loads(await ws.recv())
                 if topic == "phoenix":          # heartbeat acks, not channel traffic
                     continue
-                # The full topic is printed once at join; repeating a user id
-                # on every line just makes them unreadable.
                 body = json.dumps(payload, separators=(",", ":"))
-                print(f"{stamp()}  {topic.split(':')[0]:<18} <- {event}  {body[:400]}")
+                print(f"{stamp()}  {label(topic)} <- {event}  {body[:400]}")
         finally:
             keepalive.cancel()
 
@@ -90,7 +112,18 @@ def main():
                         required=True,
                         help="topic to join, repeatable. <user_id> is substituted, "
                              "e.g. --topic 'active_orders:<user_id>'")
+    parser.add_argument("--payload", default="{}", metavar="JSON",
+                        help="join payload, e.g. --payload "
+                             "'{\"rule_filters\": [\"home_winner\"]}' on the markets "
+                             "channel. Default {}")
     args = parser.parse_args()
+
+    try:
+        join_payload = json.loads(args.payload)
+    except json.JSONDecodeError as error:
+        sys.exit(f"--payload is not valid JSON: {error}")
+    if not isinstance(join_payload, dict):
+        sys.exit("--payload must be a JSON object")
 
     config = stx.load_profile(args.profile)
     private_key = stx.load_private_key(config)
@@ -107,7 +140,7 @@ def main():
         topics = [topic.replace("<user_id>", user_id) for topic in topics]
 
     try:
-        asyncio.run(watch(config, private_key, topics))
+        asyncio.run(watch(config, private_key, topics, join_payload))
     except KeyboardInterrupt:
         print("\nstopped")
 

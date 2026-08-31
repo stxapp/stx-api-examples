@@ -57,6 +57,18 @@ HEARTBEAT_SECONDS = 20
 DEFAULT_PING_TIMEOUT_MS = 10000
 
 
+# Every stamped line goes through `line()` so BOOK, ORDER and JOIN share one
+# column. The separator is a space of its own rather than padding, because a
+# label exactly LABEL_WIDTH wide would otherwise run into the text: USER_INFO,
+# reachable via --topic, is 9 characters.
+LABEL_WIDTH = 9
+
+
+def line(label, rest):
+    """One output row: time, label column, then whatever the caller has."""
+    return f"{stamp()}  {label:<{LABEL_WIDTH}} {rest}"
+
+
 def stamp():
     return datetime.now().strftime("%H:%M:%S")
 
@@ -134,7 +146,7 @@ def render_book(payload):
     bids, offers = book.get("b") or [], book.get("o") or []
     bid = f"{bids[0]['q']:>6} @ {stx.book_price_cents(bids[0]['p']):>4}c" if bids else " " * 14
     offer = f"{str(stx.book_price_cents(offers[0]['p'])) + 'c':<5} @ {offers[0]['q']:<6}" if offers else ""
-    print(f"{stamp()}  BOOK   {bid}   |   {offer}   ({len(bids)}x{len(offers)} levels)")
+    print(line("BOOK", f"{bid}   |   {offer}   ({len(bids)}x{len(offers)} levels)"))
 
 
 # Snapshot events arrive once on join and can carry hundreds of rows. Summarise.
@@ -157,17 +169,17 @@ INTERESTING = (
 def render_event(label, event, payload):
     if event in SNAPSHOTS and isinstance(payload, dict):
         rows = payload.get(SNAPSHOTS[event]) or []
-        print(f"{stamp()}  {label:<8}{event}: {len(rows)} row(s)")
+        print(line(label, f"{event}: {len(rows)} row(s)"))
         return
 
     if isinstance(payload, dict):
         fields = {k: v for k, v in payload.items() if k in INTERESTING}
         if fields:
             body = "  ".join(f"{k}={v}" for k, v in fields.items())
-            print(f"{stamp()}  {label:<8}{event}  {body}")
+            print(line(label, f"{event}  {body}"))
             return
 
-    print(f"{stamp()}  {label:<8}{event}  {json.dumps(payload, separators=(',', ':'))[:200]}")
+    print(line(label, f"{event}  {json.dumps(payload, separators=(',', ':'))[:200]}"))
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +187,8 @@ def render_event(label, event, payload):
 # ---------------------------------------------------------------------------
 
 
-async def watch(config, private_key, user_id, market, cancel_on_disconnect, ping_timeout_ms):
+async def watch(config, private_key, user_id, market, cancel_on_disconnect, ping_timeout_ms,
+                extra_topics=()):
     # The handshake signs GET against /socket/websocket with the query string
     # DROPPED - `?vsn=2.0.0` is on the URL but not in the signed message.
     # Phoenix's transport only surfaces x-* headers, so the names must be exact
@@ -194,6 +207,13 @@ async def watch(config, private_key, user_id, market, cancel_on_disconnect, ping
         f"active_settlements:{user_id}": "SETTLE",
         f"portfolio:{user_id}": "WALLET",
     }
+
+    # Anything passed with --topic joins on the same socket. The join loop, the
+    # label lookup and render_event are all topic-agnostic already, so a topic
+    # this file has never heard of prints its frames like any other.
+    for topic in extra_topics:
+        topics.setdefault(topic.replace("<user_id>", user_id),
+                          topic.split(":")[0].upper())
 
     async with websockets.connect(url, additional_headers=headers) as ws:
         tasks = [asyncio.create_task(socket_heartbeat(ws))]
@@ -224,12 +244,12 @@ async def watch(config, private_key, user_id, market, cancel_on_disconnect, ping
                 if event == "phx_reply":
                     response = payload.get("response") or {}
                     if payload.get("status") != "ok":
-                        print(f"{stamp()}  JOIN    {label} FAILED: {response}")
+                        print(line("JOIN", f"{label} FAILED: {response}"))
                     elif response.get("ping") == "pong":
                         pass                     # cancel_on_disconnect keepalive ack
                     elif response.get("cancel_on_disconnect"):
-                        print(f"{stamp()}  JOIN    {label} ok, cancel_on_disconnect "
-                              f"ping_timeout={response.get('ping_timeout')}ms")
+                        print(line("JOIN", f"{label} ok, cancel_on_disconnect "
+                                           f"ping_timeout={response.get('ping_timeout')}ms"))
                     elif "ob" in response:
                         # A market: join replies with the current book, so there
                         # is no need to ask for a snapshot first.
@@ -239,7 +259,7 @@ async def watch(config, private_key, user_id, market, cancel_on_disconnect, ping
                 if event in ("phx_close", "phx_error"):
                     # On market:* this also means the market reached a terminal
                     # status and the server dropped us - not a network fault.
-                    print(f"{stamp()}  {event.upper()} on {topic}")
+                    print(line(event.upper(), f"on {topic}"))
                     continue
 
                 if event == "order_book_update":
@@ -264,6 +284,9 @@ def main():
     parser.add_argument("--ping-timeout", type=int, default=DEFAULT_PING_TIMEOUT_MS,
                         help=f"cancel_on_disconnect timeout in ms, 5000-20000 "
                              f"(default {DEFAULT_PING_TIMEOUT_MS})")
+    parser.add_argument("--topic", action="append", default=[], metavar="TOPIC",
+                        help="extra topic to join, repeatable. <user_id> is "
+                             "substituted, e.g. --topic 'user_info:<user_id>'")
     args = parser.parse_args()
 
     config = stx.load_profile(args.profile)
@@ -279,7 +302,7 @@ def main():
 
     try:
         asyncio.run(watch(config, private_key, user_id, market,
-                          args.cancel_on_disconnect, args.ping_timeout))
+                          args.cancel_on_disconnect, args.ping_timeout, args.topic))
     except KeyboardInterrupt:
         print("\nstopped")
 

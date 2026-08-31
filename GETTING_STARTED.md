@@ -267,6 +267,23 @@ push separately. The two scripts are the same measurement in two runtimes, so
 you can compare them on your own network path. They place real orders, so
 `--rounds` is capped at 10.
 
+## Channel examples
+
+The socket carries nine channels: an order book per market, a market-discovery
+channel, and six scoped to your user id. Sign the handshake and join whatever
+you need on one connection; step 6 above joins six of them at once.
+
+**[CHANNELS.md](./CHANNELS.md)** documents each one: what it is for, the frame
+to join it, a real payload, and the client events you can send. It also covers
+the two keep-alive timers, `cancel_on_disconnect`, and the reconnect procedure.
+
+To look at a single channel rather than all six, `watch_channel.py` joins only
+what you name and prints frames unformatted:
+
+```bash
+python python/websockets/watch_channel.py --topic 'portfolio:<user_id>'
+```
+
 ## Reference
 
 Everything below is the detail you will want once the walkthrough works. The
@@ -319,14 +336,20 @@ though `?vsn=2.0.0` is on the URL.
 
 ### Prices
 
-Two representations, and they do not agree. Orders are integer cents. Book and
-quote prices are decimal dollars, sent as strings.
+Three representations, and they do not agree. Orders are integer cents. Book
+prices are decimal dollars, sent as a string over REST and as a number over the
+socket, which also repeats the book in cents.
 
 | where | example | unit |
 | --- | --- | --- |
-| `market.bids[i].price`, socket `level.p` | `"0.54"` | decimal dollars, as a string |
+| REST `market.bids[i].price` | `"0.61"` | decimal dollars, as a string |
+| socket `ob.b[i].p` | `0.61` | decimal dollars, as a number |
+| socket `bids[i].price` | `61` | integer cents |
 | `market.max_price` | `100` | integer cents |
-| `order.price`, on POST and on GET | `54` | integer cents |
+| `order.price`, on POST and on GET | `61` | integer cents |
+
+The socket join reply carries the book twice, in both units: `ob` holds dollars
+and `bids`/`offers` hold cents. Pick one and stay with it.
 
 This means a price read off the book cannot go straight into an order. Say the
 best bid is `"0.54"` and you want to rest an order ten cents below it, at 44c.
@@ -374,29 +397,6 @@ optional and only override what the host table resolves: `STX_PROFILE`,
 `./configure` and `./verify` read only `STX_DIR` and take everything else from
 the file, so `./verify` ignores a `STX_KEY_ID` you set for the examples.
 
-### Sockets
-
-There are two timers, not one, and it is the single easiest thing to get wrong
-by hand:
-
-| Timer | Reset by | Window | Miss it and |
-| --- | --- | --- | --- |
-| Socket keep-alive | a heartbeat on the `phoenix` topic | 60s | the connection closes |
-| `cancel_on_disconnect` | a `ping` on the `active_orders` topic | 5000-20000 ms, whatever you negotiated at join | **your flagged orders are cancelled** on a connection that is still up |
-
-A 30-second heartbeat keeps the socket alive and still blows the `ping`
-deadline. Send the channel `ping` on its own timer, not in response to traffic:
-a quiet market produces no traffic and the deadline does not care.
-
-**Reuse the `join_ref`.** Phoenix frames are `[join_ref, ref, topic, event,
-payload]`, and a message to a topic must carry the same `join_ref` you used to
-join it, or the server ignores it silently. This is the usual reason
-`request_snapshot` appears to do nothing.
-
-**A quiet market publishes nothing.** Book updates are emitted when the book
-changes, so silence is not a broken connection. Use `request_snapshot` after any
-reconnect rather than waiting for a tick.
-
 ### Known issues
 
 - **`?status=OPEN` returns 400.** Status values are lowercase, and `open` is the
@@ -408,8 +408,8 @@ reconnect rather than waiting for a tick.
 
 | | |
 | --- | --- |
-| [README.md](./README.md) | The reference: signing, price units, response shapes, known issues |
-| [SOCKETS.md](./SOCKETS.md) | Every channel and event, cancel-on-disconnect, reconnect procedure |
+| [CHANNELS.md](./CHANNELS.md) | Every channel and event, cancel-on-disconnect, the reconnect procedure |
+| [README.md](./README.md) | What is in the repository, and the setup commands |
 | [Authentication](https://docs.stxapp.io/api/authentication/) | Signing in several languages, with a test vector |
 | [postman/](./postman) | One request per route, with the signing one-liner |
 

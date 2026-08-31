@@ -44,7 +44,8 @@ each step.
 
 **WebSockets**: stream the book together with your own orders, trades,
 positions and balance on one authenticated socket.
-[Watch it live](./GETTING_STARTED.md#6-watch-it-live)
+[Watch it live](./GETTING_STARTED.md#6-watch-it-live) ·
+[Every channel](./CHANNELS.md)
 
 **Latency**: measure the round trip from placing an order to seeing it on the
 book, in both runtimes, on your own network path.
@@ -74,13 +75,6 @@ selects another.
 Signing, price units, response shapes, socket timers and known issues are in
 [Reference](./GETTING_STARTED.md#reference). The full API lives at
 [docs.stxapp.io](https://docs.stxapp.io).
-
-## Also in this repository
-
-`SOCKETS.md` predates the REST API and describes the exchange as GraphQL-only,
-on hostnames we no longer publish. It is being replaced by
-[docs.stxapp.io](https://docs.stxapp.io) and is kept here only until that move
-completes. **Where it disagrees with the docs site, it is wrong.**
 
 ## Support
 

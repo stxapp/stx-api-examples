@@ -71,9 +71,8 @@ echo
 # ---------------------------------------------------------------------------
 # JavaScript: javascript/node_modules, from the committed package-lock.json
 #
-# Only the WebSocket examples need these (phoenix and ws). The REST and GraphQL
-# examples use built-in fetch and node:crypto, so they run with nothing
-# installed.
+# Only the WebSocket examples need these (phoenix and ws). The REST examples
+# use built-in fetch and node:crypto, so they run with nothing installed.
 # ---------------------------------------------------------------------------
 
 if ! command -v node >/dev/null 2>&1; then

@@ -217,9 +217,8 @@ def cmd_roundtrip(config, private_key, args):
         "client_order_id": f"quickstart-{int(time.time())}",
     }
 
-    # The body is flat. Wrapping it in {"user_order": {...}}, the way the
-    # GraphQL mutation takes it, returns 400. And a successful placement is a
-    # 200, not a 201.
+    # The body is flat. Wrapping it in {"user_order": {...}} returns 400. And a
+    # successful placement is a 200, not a 201.
     order = request(config, private_key, "POST", "/api/v1/orders", body)["order"]
     print(f"placed     {order['id']}  status={order['status']}  filled={order.get('filled', 0)}")
 

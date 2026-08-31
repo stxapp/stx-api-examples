@@ -205,7 +205,7 @@
                 "orders"
               ]
             },
-            "description": "Returns 200 (not 201) as {\"order\": {...}}.\n\nThe body is FLAT: wrapping it in {\"user_order\": {...}}, the way the GraphQL mutation takes it, returns 400.\n\n`price` is a whole number of cents, strictly below the market's max_price. A rejection reports the cap in DOLLARS while the field is CENTS: price 4650 on a $1 market returns 422 \"The order's price must be lower than 1.00\".\n\nNeeds a read_write key.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}.",
+            "description": "Returns 200 (not 201) as {\"order\": {...}}.\n\nThe body is FLAT: wrapping it in {\"user_order\": {...}} returns 400.\n\n`price` is a whole number of cents, strictly below the market's max_price. A rejection reports the cap in DOLLARS while the field is CENTS: price 4650 on a $1 market returns 422 \"The order's price must be lower than 1.00\".\n\nNeeds a read_write key.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"market_id\": \"{{market_id}}\",\n  \"order_type\": \"limit\",\n  \"action\": \"buy\",\n  \"price\": 42,\n  \"quantity\": 5,\n  \"client_order_id\": \"postman-1\"\n}",

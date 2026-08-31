@@ -14,8 +14,7 @@
 // for the WebSocket examples. Node 20 or newer.
 //
 // Credentials come from ~/.stx/credentials, written by ./configure. Every
-// /api/v1 route requires a signature - there are no public REST endpoints - so
-// even `markets` needs a key. `roundtrip` needs a read_write one.
+// /api/v1 route requires a signature, so even `markets` needs a key. `roundtrip` needs a read_write one.
 
 import { loadProfile, signedHeaders, parseArgs, fail, bookPriceCents } from "../stx.mjs";
 

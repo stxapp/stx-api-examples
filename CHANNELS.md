@@ -50,6 +50,15 @@ python python/websockets/watch_channel.py --topic orderbook \
   --payload '{"market_ids": ["<market_id>"]}'
 ```
 
+Payloads are clipped to 400 characters so a join snapshot of several hundred
+rows does not bury the stream. That is narrower than one `ticker` frame, so pass
+`--full` when you are reading a message rather than watching for one:
+
+```sh
+python python/websockets/watch_channel.py --topic ticker --full
+node javascript/websockets/watch_channel.mjs --topic ticker --full
+```
+
 Use `watch.py` instead when you want the whole picture: it joins `orderbook`,
 `ticker` and your five user channels at once and formats what it recognises. Its
 own `--topic` adds to that set rather than replacing it.

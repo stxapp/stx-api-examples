@@ -14,6 +14,12 @@ what you want when working through CHANNELS.md one channel at a time.
     python python/websockets/watch_channel.py \\
         --topic ticker --topic 'balances:<user_id>'
 
+`--full` prints whole payloads. They are clipped by default, because a join
+snapshot can carry hundreds of rows and one `ticker` frame is already wider than
+most terminals:
+
+    python python/websockets/watch_channel.py --topic ticker --full
+
 `--payload` sets the join payload. The public topics use it for filtering, and
 `orderbook` REQUIRES at least one market_id:
 
@@ -59,6 +65,11 @@ import stx  # noqa: E402
 # CHANNELS.md. watch.py is the example that negotiates that one.
 HEARTBEAT_SECONDS = 20
 
+# Payloads are clipped to this many characters unless --full is given. A join
+# snapshot can carry hundreds of rows; one ticker frame is already wider than
+# most terminals.
+DEFAULT_MAX_CHARS = 400
+
 
 def stamp():
     return time.strftime("%H:%M:%S")
@@ -79,7 +90,7 @@ async def heartbeat(ws):
         await ws.send(json.dumps([None, str(ref), "phoenix", "heartbeat", {}]))
 
 
-async def watch(config, private_key, topics, join_payload):
+async def watch(config, private_key, topics, join_payload, max_chars=DEFAULT_MAX_CHARS):
     # The handshake signs GET against /socket/websocket with the query string
     # DROPPED - `?vsn=2.0.0` is on the URL but not in the signed message.
     headers = stx.signed_headers(private_key, config["key_id"], "GET", stx.SOCKET_PATH)
@@ -107,7 +118,12 @@ async def watch(config, private_key, topics, join_payload):
                 if topic == "phoenix":          # heartbeat acks, not channel traffic
                     continue
                 body = json.dumps(payload, separators=(",", ":"))
-                print(f"{stamp()}  {label(topic)} <- {event}  {body[:400]}")
+                # A join snapshot can carry hundreds of rows, so payloads are
+                # clipped by default. --full turns that off, which is what you
+                # want when reading one message rather than watching a stream.
+                if max_chars is not None and len(body) > max_chars:
+                    body = f"{body[:max_chars]}... [{len(body)} chars, --full to see it all]"
+                print(f"{stamp()}  {label(topic)} <- {event}  {body}")
 
                 # The raw frame above is the point of this script, so the reason
                 # is printed beside it rather than instead of it. Once per run:
@@ -141,6 +157,9 @@ def main():
                         required=True,
                         help="topic to join, repeatable. <user_id> is substituted, "
                              "e.g. --topic 'orders:<user_id>'")
+    parser.add_argument("--full", action="store_true",
+                        help=f"print whole payloads instead of clipping them at "
+                             f"{DEFAULT_MAX_CHARS} characters")
     parser.add_argument("--payload", default="{}", metavar="JSON",
                         help="join payload, e.g. --payload "
                              "'{\"rule_filters\": [\"home_winner\"]}' on the markets "
@@ -172,7 +191,8 @@ def main():
         topics = [topic.replace("<user_id>", user_id) for topic in topics]
 
     try:
-        asyncio.run(watch(config, private_key, topics, join_payload))
+        asyncio.run(watch(config, private_key, topics, join_payload,
+                          None if args.full else DEFAULT_MAX_CHARS))
     except KeyboardInterrupt:
         print("\nstopped")
 

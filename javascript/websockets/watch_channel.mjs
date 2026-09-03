@@ -4,6 +4,12 @@
 //   node javascript/websockets/watch_channel.mjs --topic 'orders:<user_id>'
 //   node javascript/websockets/watch_channel.mjs --topic 'account:<user_id>'
 //
+// --full prints whole payloads. They are clipped by default, because a join
+// snapshot can carry hundreds of rows and one `ticker` frame is already wider
+// than most terminals:
+//
+//   node javascript/websockets/watch_channel.mjs --topic ticker --full
+//
 // --payload sets the join payload. The public topics use it for filtering, and
 // `orderbook` REQUIRES at least one market_id:
 //
@@ -39,6 +45,11 @@ import {
 // see CHANNELS.md. watch.mjs is the example that negotiates that one.
 const HEARTBEAT_MS = 20_000;
 
+// Payloads are clipped to this many characters unless --full is given. A join
+// snapshot can carry hundreds of rows; one ticker frame is already wider than
+// most terminals.
+const DEFAULT_MAX_CHARS = 400;
+
 const stamp = () => new Date().toISOString().slice(11, 19);
 
 // The topic's prefix, padded. The full topic is on the join frame; repeating a
@@ -48,6 +59,7 @@ const label = (topic) => topic.split(":")[0].padEnd(18);
 const args = parseArgs();
 const config = loadProfile(args.profile);
 const topics = argList(args.topic);
+const maxChars = args.full ? null : DEFAULT_MAX_CHARS;
 if (topics.length === 0) {
   fail("--topic is required, e.g. --topic markets");
 }
@@ -124,7 +136,15 @@ let warnedUnmatched = false;
 ws.on("message", (data) => {
   const [, , topic, event, payload] = JSON.parse(data);
   if (topic === "phoenix") return; // heartbeat acks, not channel traffic
-  console.log(`${stamp()}  ${label(topic)} <- ${event}  ${JSON.stringify(payload).slice(0, 400)}`);
+  // A join snapshot can carry hundreds of rows, so payloads are clipped by
+  // default. --full turns that off, which is what you want when reading one
+  // message rather than watching a stream.
+  const body = JSON.stringify(payload);
+  const shown =
+    maxChars !== null && body.length > maxChars
+      ? `${body.slice(0, maxChars)}... [${body.length} chars, --full to see it all]`
+      : body;
+  console.log(`${stamp()}  ${label(topic)} <- ${event}  ${shown}`);
 
   // The raw frame above is the point of this script, so the reason is printed
   // beside it rather than instead of it. Once per run: on an older host every

@@ -1,0 +1,209 @@
+#!/bin/sh
+# verify - sign GET /api/v1/me and print who the key belongs to.
+#
+#     ./verify              # the [default] profile
+#     ./verify us-demo      # a named profile
+#
+# Two jobs. It proves ./configure worked and that the exchange accepts your key,
+# and it is the shortest complete example of STX request signing there is: curl
+# and openssl, no language runtime.
+#
+# Its output also gives you the user_id that private WebSocket channel topics
+# need - orders:<user_id> and the rest. There is no other way to read it.
+#
+# POSIX sh. Needs curl and an OpenSSL 3.x `openssl` (see the note by sign()).
+
+set -eu
+
+STX_DIR="${STX_DIR:-$HOME/.stx}"
+CREDENTIALS="$STX_DIR/credentials"
+PROFILE="${1:-default}"
+
+# ---------------------------------------------------------------------------
+# Base URLs. The one table for shell - configure stores `exchange` and
+# `environment`, and this resolves the pair. Nothing else in this repository
+# writes a hostname.
+#
+# A host not in the table - a local server, a review app - goes in the profile
+# as a `base_url` line, which wins over the pair. The Python and JavaScript
+# examples read the same key, and also accept STX_BASE_URL; this script takes
+# everything but STX_DIR from the file, so the key is the way in here.
+# ---------------------------------------------------------------------------
+
+base_url() {
+    case "$1/$2" in
+        us/integration) echo "https://demo.stxapp.io" ;;
+        ca/integration) echo "https://api-staging.on.sportsxapp.com" ;;
+        ca/production)  echo "https://api.on.stxapp.ca" ;;
+        *)
+            echo "No base URL for exchange '$1' environment '$2'." >&2
+            echo "Known: us/integration, ca/integration, ca/production." >&2
+            return 1
+            ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# Read one value out of one INI section, without an INI parser.
+# ---------------------------------------------------------------------------
+
+profile_value() {
+    awk -v section="[$PROFILE]" -v key="$2" '
+        /^\[/ { in_section = ($0 == section); next }
+        !in_section { next }
+        {
+            line = $0
+            sub(/[;#].*/, "", line)                     # strip comments
+            split(line, kv, "=")
+            name = kv[1]
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", name)
+            if (name != key) next
+            sub(/^[^=]*=/, "", line)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+            print line
+        }
+    ' "$1"
+}
+
+if [ ! -f "$CREDENTIALS" ]; then
+    echo "No $CREDENTIALS. Run ./configure first." >&2
+    exit 1
+fi
+
+EXCHANGE=$(profile_value "$CREDENTIALS" exchange)
+ENVIRONMENT=$(profile_value "$CREDENTIALS" environment)
+BASE_URL_OVERRIDE=$(profile_value "$CREDENTIALS" base_url)
+KEY_ID=$(profile_value "$CREDENTIALS" key_id)
+KEY_PATH=$(profile_value "$CREDENTIALS" private_key)
+
+if [ -z "$KEY_ID" ] || [ -z "$KEY_PATH" ]; then
+    echo "Profile [$PROFILE] is missing key_id or private_key in $CREDENTIALS." >&2
+    echo "Run ./configure $PROFILE" >&2
+    exit 1
+fi
+
+case "$KEY_PATH" in
+    "~/"*) KEY_PATH="$HOME/${KEY_PATH#\~/}" ;;
+esac
+
+if [ ! -r "$KEY_PATH" ]; then
+    echo "Cannot read private key $KEY_PATH" >&2
+    exit 1
+fi
+
+if [ -n "$BASE_URL_OVERRIDE" ]; then
+    # Strip any trailing slash: //api/v1 404s on some routers.
+    BASE_URL=$(printf '%s' "$BASE_URL_OVERRIDE" | sed 's:/*$::')
+else
+    BASE_URL=$(base_url "${EXCHANGE:-us}" "${ENVIRONMENT:-integration}")
+fi
+
+for tool in curl openssl; do
+    if ! command -v "$tool" >/dev/null 2>&1; then
+        echo "$tool is required and was not found." >&2
+        exit 1
+    fi
+done
+
+# ---------------------------------------------------------------------------
+# Signing
+#
+# Three headers on every call to /api/v1. The signed message is a bare
+# concatenation, with no separators and no body:
+#
+#     timestamp_ms + HTTP_METHOD_UPPERCASE + path
+#
+# The path includes its query string when there is one, and never the scheme or
+# host. Plain Ed25519 over the UTF-8 bytes - not Ed25519ph, no pre-hashing - and
+# standard padded base64. The timestamp must be within 30 seconds of the server
+# clock, so it is generated per request. Keep the machine on NTP.
+#
+# `openssl pkeyutl -rawin` is how OpenSSL 3.x signs with Ed25519. Two traps:
+#
+#   * The `openssl` on macOS is LibreSSL, which has no Ed25519 support at all.
+#     Install OpenSSL 3 (`brew install openssl@3`) and put it ahead on PATH.
+#   * The message must arrive as a FILE, via `-in`. Ed25519 is a one-shot
+#     algorithm, so openssl needs the length up front; piping to stdin fails
+#     with "unable to determine file size for oneshot operation", and so does a
+#     plain `<` redirect. Hence the temporary file. The message is not secret -
+#     it is a timestamp, a method and a path.
+# ---------------------------------------------------------------------------
+
+sign() {
+    printf '%s' "$1" > "$MESSAGE_FILE"
+    openssl pkeyutl -sign -inkey "$KEY_PATH" -rawin -in "$MESSAGE_FILE" 2>/dev/null \
+        | openssl base64 -A
+}
+
+METHOD="GET"
+REQUEST_PATH="/api/v1/me"
+TIMESTAMP="$(date +%s)000"
+MESSAGE="$TIMESTAMP$METHOD$REQUEST_PATH"
+
+MESSAGE_FILE=$(mktemp)
+trap 'rm -f "$MESSAGE_FILE" "${RESPONSE_FILE:-}"' EXIT INT HUP TERM
+
+SIGNATURE=$(sign "$MESSAGE")
+
+if [ -z "$SIGNATURE" ]; then
+    echo "openssl produced no signature." >&2
+    echo "Most likely this openssl is LibreSSL, which cannot sign with Ed25519:" >&2
+    openssl version >&2
+    echo "Install OpenSSL 3.x and put it first on PATH." >&2
+    exit 1
+fi
+
+echo "profile     [$PROFILE] -> $EXCHANGE/$ENVIRONMENT"
+echo "host        $BASE_URL"
+echo "signing     $METHOD $REQUEST_PATH"
+echo
+
+RESPONSE_FILE=$(mktemp)
+
+STATUS=$(curl -sS -o "$RESPONSE_FILE" -w '%{http_code}' \
+    -H "X-STX-ACCESS-KEY: $KEY_ID" \
+    -H "X-STX-ACCESS-TIMESTAMP: $TIMESTAMP" \
+    -H "X-STX-ACCESS-SIGNATURE: $SIGNATURE" \
+    "$BASE_URL$REQUEST_PATH")
+
+# A tiny field reader. Good enough for the flat /me payload; do not grow it into
+# a JSON parser - the language examples have real ones.
+field() {
+    tr ',' '\n' < "$RESPONSE_FILE" \
+        | grep "\"$1\"" \
+        | head -n 1 \
+        | sed 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\{0,1\}//; s/["}].*//'
+}
+
+if [ "$STATUS" != "200" ]; then
+    echo "HTTP $STATUS"
+    cat "$RESPONSE_FILE"
+    echo
+    case "$STATUS" in
+        401)
+            echo "401 means the signature, key id or timestamp was not accepted:"
+            echo "  - is the key id in [$PROFILE] the one shown when you created the key?"
+            echo "  - is this key registered on $BASE_URL? A key belongs to one environment."
+            echo "  - is the clock right? The tolerance is 30 seconds. Now: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            ;;
+        404) echo "404 suggests the host is wrong for this exchange/environment pair." ;;
+    esac
+    exit 1
+fi
+
+USER_ID=$(field user_id)
+SCOPE=$(field scope)
+
+echo "OK"
+echo "  user_id   ${USER_ID:-?}"
+echo "  scope     ${SCOPE:-?}"
+echo
+
+if [ "$SCOPE" = "read_only" ]; then
+    echo "This key can read but not trade. Anything that places or cancels an order"
+    echo "needs a read_write key."
+    echo
+fi
+
+echo "Private WebSocket topics are scoped by that user id, e.g."
+echo "  orders:${USER_ID:-<user_id>}"

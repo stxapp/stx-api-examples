@@ -16,7 +16,10 @@
 // Credentials come from ~/.stx/credentials, written by ./configure. Every
 // /api/v1 route requires a signature, so even `markets` needs a key. `roundtrip` needs a read_write one.
 
-import { loadProfile, signedHeaders, parseArgs, fail, bookPriceCents } from "../stx.mjs";
+import {
+  loadProfile, signedHeaders, parseArgs, fail, toNumber, dollarString, fmtMoney,
+  unreachable,
+} from "../stx.mjs";
 
 /**
  * Send one signed request and return the decoded JSON.
@@ -26,14 +29,20 @@ import { loadProfile, signedHeaders, parseArgs, fail, bookPriceCents } from "../
  * /api/v1/markets and sending /api/v1/markets?status=open is a 401.
  */
 async function request(config, method, path, body) {
-  const response = await fetch(config.baseUrl + path, {
-    method,
-    headers: {
-      ...signedHeaders(config, method, path),
-      "Content-Type": "application/json",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let response;
+  try {
+    response = await fetch(config.baseUrl + path, {
+      method,
+      headers: {
+        ...signedHeaders(config, method, path),
+        "Content-Type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (error) {
+    // fetch rejects rather than resolving when the host never answered.
+    fail(unreachable(config.baseUrl, error));
+  }
 
   const text = await response.text();
 
@@ -48,8 +57,10 @@ async function request(config, method, path, body) {
   }
 
   if (!response.ok) {
-    // 422 is the exchange rejecting a well-formed, authenticated request - a
-    // price at or above the market's max_price, say. Read the message in full.
+    // 400 is a malformed request. On POST /api/v1/orders the usual cause is a
+    // `price` sent as a number instead of a dollar string - see cmdRoundtrip.
+    // 422 is the exchange rejecting a well-formed, authenticated request: a
+    // price at or above the market's max_price, say. Read either in full.
     fail(`HTTP ${response.status}: ${text.slice(0, 500)}`);
   }
 
@@ -63,8 +74,9 @@ async function request(config, method, path, body) {
 /**
  * GET /api/v1/me - the only place your user id is published.
  *
- * Private WebSocket topics are scoped by it: active_orders:<user_id>,
- * portfolio:<user_id>, and so on. Fetch it once at startup and hold it.
+ * Private WebSocket topics are scoped by it: orders:<user_id>,
+ * balances:<user_id>, account:<user_id>, and so on. Fetch it once at startup
+ * and hold it.
  */
 async function cmdMe(config) {
   const { me } = await request(config, "GET", "/api/v1/me");
@@ -120,11 +132,10 @@ async function cmdMarkets(config) {
   const markets = tradeable(open);
   if (markets.length === 0) fail("No tradeable markets right now.");
 
-  // Book prices arrive as decimal-dollar strings ("0.54") while max_price is
-  // integer cents (100), so both go through bookPriceCents to be shown and
-  // compared in the same unit. A US market settles at $1, so max_price is 100
-  // and quotes run 1-99. Canada settles at $100 and max_price is 10000. Read it
-  // off the market, do not assume.
+  // Every price here is a dollar string ("0.6100", "1.0000"), so the column is
+  // a straight format rather than a conversion. A US market settles at $1, so
+  // max_price is "1.0000" and quotes run $0.01-$0.99. Canada settles at $100
+  // and max_price is "100.0000". Read it off the market, do not assume.
   // Symbols are back-loaded: the leg that distinguishes sibling markets
   // (TOTAL-3_5 from TOTAL-4_5) is in the tail, and --market takes a symbol, so
   // this column has to survive intact. TITLE is last and absorbs the slack - a
@@ -137,11 +148,11 @@ async function cmdMarkets(config) {
     `${"SYMBOL".padEnd(symbolWidth)} ${"BID".padStart(7)} ${"OFFER".padStart(7)} ${"MAX".padStart(7)}  TITLE`
   );
   for (const market of shown) {
-    const bid = market.bids?.[0] ? `${bookPriceCents(market.bids[0].price)}c` : "-";
-    const offer = market.offers?.[0] ? `${bookPriceCents(market.offers[0].price)}c` : "-";
+    const bid = market.bids?.[0] ? fmtMoney(market.bids[0].price) : "-";
+    const offer = market.offers?.[0] ? fmtMoney(market.offers[0].price) : "-";
     console.log(
       `${market.symbol.padEnd(symbolWidth)} ${bid.padStart(7)} ${offer.padStart(7)} ` +
-        `${`${market.max_price}c`.padStart(7)}  ${(market.title ?? "").slice(0, titleWidth)}`
+        `${fmtMoney(market.max_price).padStart(7)}  ${(market.title ?? "").slice(0, titleWidth)}`
     );
   }
 
@@ -162,14 +173,17 @@ async function cmdOrders(config) {
     return;
   }
 
+  // price is a dollar string, or null on a market order. quantity and filled
+  // are strings too ("1.00"), and print as they arrive - a column needs no
+  // conversion. Parse before doing ARITHMETIC on them, as cmdRoundtrip does.
   console.log(
     `${"ID".padEnd(38)} ${"SIDE".padEnd(5)} ${"QTY".padStart(6)} ${"PRICE".padStart(7)} ${"FILLED".padStart(7)}  STATUS`
   );
   for (const order of orders) {
-    const price = order.price == null ? "MKT" : `${order.price}c`;
+    const price = order.price == null ? "MKT" : fmtMoney(order.price);
     console.log(
-      `${order.id.padEnd(38)} ${order.action.padEnd(5)} ${String(order.quantity).padStart(6)} ` +
-        `${price.padStart(7)} ${String(order.filled ?? 0).padStart(7)}  ${order.status}`
+      `${order.id.padEnd(38)} ${order.action.padEnd(5)} ${order.quantity.padStart(6)} ` +
+        `${price.padStart(7)} ${(order.filled ?? "0.00").padStart(7)}  ${order.status}`
     );
   }
 }
@@ -192,17 +206,18 @@ async function cmdRoundtrip(config, args) {
   const market = tradeable(await listMarkets(config)).find((m) => m.bids?.length > 0);
   if (!market) fail("No tradeable market with a bid to price against.");
 
-  // The book quotes dollars, orders take cents - see bookPriceCents.
-  const bestBid = bookPriceCents(market.bids[0].price);
+  // Parse before doing arithmetic. `"0.61" - 0.1` happens to work by coercion,
+  // but `"0.61" + 0.1` is the string "0.610.1" and nothing warns you.
+  const bestBid = toNumber(market.bids[0].price);
 
-  // Ten cents under the touch, floored at 1c. The ceiling is the market's own
-  // max_price, and the rejection message reports it in DOLLARS while the field
-  // is CENTS: price 4650 on a $1 market returns "The order's price must be
-  // lower than 1.00".
-  const price = Math.max(1, bestBid - 10);
+  // Ten cents under the touch, floored at a cent. The ceiling is the market's
+  // own max_price, and going over it is a 422 quoting the cap.
+  const price = Math.max(0.01, bestBid - 0.1);
 
-  console.log(`${market.symbol}  best bid ${bestBid}c, max_price ${market.max_price}c`);
-  console.log(`placing    BUY 1 @ ${price}c`);
+  console.log(
+    `${market.symbol}  best bid ${fmtMoney(bestBid)}, max_price ${fmtMoney(market.max_price)}`
+  );
+  console.log(`placing    BUY 1 @ ${fmtMoney(price)}`);
 
   // The body is flat. Wrapping it in {user_order: {...}} returns 400. And a
   // successful placement is a 200, not a 201.
@@ -210,13 +225,21 @@ async function cmdRoundtrip(config, args) {
     market_id: market.market_id,
     order_type: "limit",
     action: "buy",
-    price,
+    // A STRING, in dollars. Sending the number 51 is a 400: an integer used to
+    // mean 51 cents, and reading it as $51.00 would be a 100x overprice, so the
+    // server rejects it rather than guessing. quantity is exempt - a contract
+    // count carries no unit ambiguity - and still takes a number.
+    price: dollarString(price),
     quantity: 1,
     // Your own reference, echoed back on the order and on every socket push
     // about it. Use it to tie exchange state to your own.
     client_order_id: `quickstart-${Date.now()}`,
   });
-  console.log(`placed     ${order.id}  status=${order.status}  filled=${order.filled ?? 0}`);
+  // The echoed price is the same order at the server's width: "0.51" in,
+  // "0.5100" back. Compare as numbers, never as strings.
+  console.log(
+    `placed     ${order.id}  status=${order.status}  price=${order.price}  filled=${order.filled ?? "0.00"}`
+  );
 
   const cancelled = await request(config, "DELETE", `/api/v1/orders/${order.id}`);
   console.log(`cancelled  status=${cancelled.status}`);

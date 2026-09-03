@@ -42,8 +42,8 @@ each step.
 [Read market data](./GETTING_STARTED.md#4-read-market-data) ·
 [Place and cancel an order](./GETTING_STARTED.md#5-place-and-cancel-an-order)
 
-**WebSockets**: stream the book together with your own orders, trades,
-positions and balance on one authenticated socket.
+**WebSockets**: stream the book together with your own orders, fills, positions
+and balances on one authenticated socket, in the same dollar format as REST.
 [Watch it live](./GETTING_STARTED.md#6-watch-it-live) ·
 [Every channel](./CHANNELS.md)
 
@@ -61,14 +61,21 @@ selects another.
 
 - **Every `/api/v1` route requires your API key.** Reading market data needs a
   signed request just as much as placing an order does.
-- **Prices use two representations.** Book prices are decimal-dollar strings
-  (`"0.54"`); orders and `max_price` are integer cents (`54`, `100`).
+- **REST money and quantities are dollar strings.** `price: "0.5400"`,
+  `max_price: "1.0000"`, `quantity: "1.00"` - never cents, never a JSON number.
+  On `POST /api/v1/orders`, `price` must be a string; a number is a `400`. The
+  dollar-format WebSocket topics match it field for field; the older topics still
+  send cents. [Prices](./GETTING_STARTED.md#prices) lays out both.
 - **The JavaScript REST examples have no dependencies.** Node has Ed25519 in
   `node:crypto` and `fetch` built in. Only the WebSocket examples use packages.
   Python needs `cryptography`, `requests` and `websockets`, which `./install.sh`
   puts in `python/.venv`.
 - **`./configure` never takes key material as an argument** and never prints
   your private key.
+- **`STX_BASE_URL` points the examples at any host**, such as a server running
+  on your own machine: `STX_BASE_URL=http://localhost:8000 python
+  python/rest/quickstart.py markets`. See
+  [Pointing at another host](./GETTING_STARTED.md#pointing-at-another-host).
 - **The latency examples place real orders.** They rest below the touch so they
   do not fill, cancel what they place, and refuse a production profile.
 

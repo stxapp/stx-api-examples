@@ -128,7 +128,7 @@ If you get `unauthorized` instead, it is almost always clock skew: the
 timestamp must be within 30 seconds of the server clock.
 
 Note the `user_id` it prints. Private WebSocket topics are scoped by it, as in
-`active_orders:<user_id>`, and `GET /api/v1/me` is the only place it is
+`orders:<user_id>`, and `GET /api/v1/me` is the only place it is
 published. Fetch it once at startup and hold it.
 
 ## 4. Read market data
@@ -139,33 +139,35 @@ node javascript/rest/quickstart.mjs markets
 ```
 
 ```
-SYMBOL                                        BID   OFFER     MAX  TITLE
-STXMLB-26AUG311805SFATL-GAMEATL               61c     75c    100c  MLB SF @ ATL
-STXMLB-26AUG311805SFATL-GAMESF                34c     45c    100c  MLB SF @ ATL
-STXEPL-26AUG311500ARSAVL-TOTAL2.5             53c     66c    100c  EPL ARS @ AVL OU 2.5
+SYMBOL                                                BID   OFFER     MAX  TITLE
+STXNCAAF-26SEP031900WESKENN-TOTAL46.5               $0.58   $0.72   $1.00  NCAAF - Week 1 WES @
+STXNCAAF-26SEP031900ALBBUFF-SPREADBUFFMINUS14.5     $0.56   $0.69   $1.00  NCAAF - Week 1 ALB @
+STXNCAAF-26SEP031900ALBBUFF-TOTAL43.5               $0.58   $0.72   $1.00  NCAAF - Week 1 ALB @
 
 200 tradeable of 200 returned by ?status=open&limit=200.
 ```
 
 The symbol is the whole string, and it is what `--market` takes later. The leg
-that distinguishes sibling markets sits at the end, so `TOTAL2.5` and
-`TOTAL3.5` differ only in their tail.
+that distinguishes sibling markets sits at the end, so `TOTAL43.5` and
+`TOTAL46.5` differ only in their tail.
 
 `me`, `orders` and `roundtrip` are the other subcommands.
 
 ## 5. Place and cancel an order
 
 Needs a `read_write` key. This places a real order, priced ten cents below the
-best bid so it rests instead of filling, then cancels it:
+best bid so it rests instead of filling, then cancels it. Note the `price` it
+sends is the string `"0.5100"`: a number there is a `400`, and
+[Prices](#prices) says why.
 
 ```bash
 python python/rest/quickstart.py roundtrip
 ```
 
 ```
-STXMLB-26AUG311805SFATL-GAMEATL  best bid 61c, max_price 100c
-placing    BUY 1 @ 51c
-placed     <order id>  status=accepted  filled=0
+STXNCAAF-26SEP031900WESKENN-TOTAL46.5  best bid $0.58, max_price $1.00
+placing    BUY 1 @ $0.48
+placed     <order id>  status=accepted  price=0.4800  filled=0.00
 cancelled  status=cancelled
 ```
 
@@ -175,14 +177,16 @@ refuses to run against a production profile unless you pass
 
 ## 6. Watch it live
 
-Open a second terminal. The watcher streams the book together with your own
-orders, fills, positions, settlements and balance, on one authenticated socket.
+Open a second terminal. The watcher streams the book and the market summary
+together with your own orders, fills, positions, settlements and balances, on one
+authenticated socket, using the dollar-format topics documented in
+[CHANNELS.md](./CHANNELS.md).
 Point it at the market `roundtrip` will use so you see both sides of the same
 book:
 
 ```bash
 # terminal 1
-python python/websockets/watch.py --market STXMLB-26AUG311805SFATL-GAMEATL
+python python/websockets/watch.py --market STXNCAAF-26SEP031900WESKENN-TOTAL46.5
 
 # terminal 2
 python python/rest/quickstart.py roundtrip
@@ -191,31 +195,57 @@ python python/rest/quickstart.py roundtrip
 ![The watcher on the left, a place-and-cancel round trip on the right. The book
 goes 5x5 to 6x5 and back as the order rests and is pulled.](./docs/watch-roundtrip.gif)
 
-*Recorded 31 August 2026 against `demo.stxapp.io`. That MLB market has long since
-settled and the prices are whatever was on the book that afternoon. It is here to
-show the shape of the two-terminal loop, not today's data. Re-record it any time
-with `vhs docs/watch-roundtrip.tape`.*
+*Recorded 3 September 2026 against `demo.stxapp.io`. That NCAAF market will have
+settled by the time you read this and the prices are whatever was on the book
+that afternoon. It is here to show the shape of the two-terminal loop, not
+today's data. Re-record it any time with `vhs docs/watch-roundtrip.tape`.*
 
-The same run, written out. Terminal 1 on join, six channels: the market book,
-plus five private ones scoped to your user id.
+The same run, written out. Terminal 1 on join, seven channels: the two public
+market feeds, plus five private ones scoped to your user id.
 
 ```
 [default -> https://demo.stxapp.io]
-watching STXMLB-26AUG311805SFATL-GAMEATL  (6 channels)   ctrl-c to stop
+watching STXNCAAF-26SEP031900WESKENN-TOTAL46.5  (7 channels)   ctrl-c to stop
 
-14:31:11  BOOK    491.0 @   61c   |   66c   @ 882.0    (5x5 levels)
-14:31:11  ORDER   all_orders: 0 row(s)
-14:31:11  TRADE   all_trades: 0 row(s)
-14:31:11  POS     all_positions: 3 row(s)
-14:31:11  WALLET  summary  available_balance=1000073
+14:51:10  JOIN      BOOK ok, markets=1
+14:51:10  JOIN      MARKET ok, sports=['Football'] competitions=['NCAAF']
+14:51:10  JOIN      ORDER ok, no market filter
+14:51:10  JOIN      FILL ok, no market filter
+14:51:10  JOIN      POS ok, no market filter
+14:51:10  JOIN      SETTLE ok, no market filter
+14:51:10  ORDER     all_orders: 0 row(s)
+14:51:10  FILL      all_trades: 0 row(s)
+14:51:10  POS       all_positions: 2 row(s)
+14:51:10  WALLET    balances  available_balance=9991.8000
 ```
+
+Neither public topic sends anything on join, so no `BOOK` or `MARKET` row
+appears until the market moves. `settlements:` sends no join frame at all, and
+`balances:` confirms itself with its `balances` payload rather than a `JOIN`
+line, which is why the counts do not line up with the seven joins.
+
+`no market filter` on the four private topics is the server echoing
+`selected_market_ids: null`. They accept the same `market_ids` filter
+`orderbook` does; the watcher sends none, so everything on the account arrives
+whichever market you pointed it at.
+
+The two `JOIN` lines show the halves of the filter contract. `orderbook` takes
+`market_ids` and narrows server-side, so only your market ever arrives. `ticker`
+takes only `sports` and `competitions`, so the watcher narrows as far as the
+server allows and then drops other markets by `market_id` itself. Read the echo
+either way: a value the server does not recognise is dropped in silence and
+comes back as `null`, meaning no filter at all.
+
+If those joins come back `FAILED ... {'reason': 'unmatched topic'}`, the host is
+not running the dollar-format topics yet. The watcher says so once and carries
+on; nothing is wrong with your key.
 
 Now run terminal 2:
 
 ```
-STXMLB-26AUG311805SFATL-GAMEATL  best bid 61c, max_price 100c
-placing    BUY 1 @ 51c
-placed     ff7217e7-9a77-406a-8a57-87a18d4d9f82  status=accepted  filled=0
+STXNCAAF-26SEP031900WESKENN-TOTAL46.5  best bid $0.58, max_price $1.00
+placing    BUY 1 @ $0.48
+placed     c8720efd-b5f0-4bb5-9f7f-83a06b714577  status=accepted  price=0.4800  filled=0.00
 cancelled  status=cancelled
 ```
 
@@ -223,16 +253,21 @@ And terminal 1 shows the whole round trip as it happens, order events and book
 depth interleaved on the one connection:
 
 ```
-14:31:14  ORDER   new_open_order  id=ff7217e7-...  status=open       price=51  client_order_id=quickstart-1788208273
-14:31:14  BOOK    491.0 @   61c   |   66c   @ 882.0    (6x5 levels)
-14:31:14  ORDER   new_open_order  id=ff7217e7-...  status=cancelled  price=51  client_order_id=quickstart-1788208273  cancellation_reason=by_player
-14:31:14  BOOK    491.0 @   61c   |   66c   @ 882.0    (5x5 levels)
+14:51:19  ORDER     new_open_order  id=c8720efd-...  status=open  action=buy  filled=0.00  quantity=1.00  price=0.4800  client_order_id=quickstart-1788468679
+14:51:20  BOOK       517.00 @  $0.58   |   $0.63  @ 810.00    (6x5 levels)
+14:51:20  ORDER     new_open_order  id=c8720efd-...  status=cancelled  action=buy  filled=0.00  quantity=1.00  price=0.4800  cancellation_reason=by_player
+14:51:20  BOOK       517.00 @  $0.58   |   $0.63  @ 810.00    (5x5 levels)
 ```
+
+Trimmed a little for width: each `ORDER` row also carries `market_id` and
+`rejection_reason`, and the cancellation arrived **twice**. Order events are not
+deduplicated, so reconcile on `id` and make your handling idempotent rather than
+counting events.
 
 This is the layout to develop against: watcher in one terminal, your strategy in
 another. Four things in that output are worth reading closely.
 
-**The order id matches across terminals.** `ff7217e7` is the same order the REST
+**The order id matches across terminals.** `c8720efd` is the same order the REST
 call returned, arriving on the socket a fraction of a second later. That gap is
 what step 7 measures.
 
@@ -240,6 +275,14 @@ what step 7 measures.
 while it is open and removes it when cancelled. It sits in the aggregated book
 anonymously, like everyone else's, so you see the depth change without seeing
 whose it is.
+
+No `MARKET` row appears in that exchange, and it is worth knowing why. `ticker`
+fires on price, book top, volume and open interest. This order rests ten cents
+under the touch, so it moves none of them - it deepens the book without
+changing the best bid. `orderbook` shows it because that feed carries every
+level; `ticker` summarises, and by its own definition this is not news. Use
+`orderbook` when you need to see your own resting orders, and `ticker` when you
+want a market's headline numbers across many markets at once.
 
 **Your `client_order_id` comes back on every order event.** Set it when you
 place, and you can reconcile against your own book without storing our ids.
@@ -336,38 +379,89 @@ though `?vsn=2.0.0` is on the URL.
 
 ### Prices
 
-Three representations, and they do not agree. Orders are integer cents. Book
-prices are decimal dollars, sent as a string over REST and as a number over the
-socket, which also repeats the book in cents.
+REST `/api/v1` sends **money as a fixed-point decimal string, in dollars**, and
+**quantities as strings** too. Nothing there is cents, and nothing there is a
+JSON number.
+
+| where | example | what it is |
+| --- | --- | --- |
+| `market.max_price` | `"1.0000"` | the market's ceiling, $1 on a US market |
+| `market.bids[i].price` | `"0.6100"` | $0.61 |
+| `market.bids[i].quantity` | `"491.00"` | contracts |
+| `market.last_traded_price`, `market.price` | `"0.6100"` | $0.61 |
+| `market.volume24h`, `total_volume`, `open_interest` | `"1234.00"` | contracts |
+| `order.price` | `"0.5100"` | $0.51, or `null` on a market order |
+| `order.quantity`, `order.filled` | `"1.00"` | contracts |
+| `order.amount`, `filled_amount`, `total_value`, `avg_price` | `"0.5100"` | dollars |
+
+The decimal count is a **minimum, not a fixed width**. Money carries at least
+four places and quantities at least two, but a value keeps any further precision
+it genuinely has: an order `price` can carry seven. Parse with a variable-scale
+decimal type - Python's `Decimal` - and never with a fixed-width reader.
+
+Not everything numeric is money. `price_change24h` is a percentage and loyalty
+`points` are points; both stay plain JSON numbers. Convert what is an amount of
+money or a count of contracts, and nothing else.
+
+#### Sending a price
+
+`price` on `POST /api/v1/orders` must be a **string**. A number is rejected:
+
+```
+400 price must be a dollar amount as a string, not a number. Values are
+dollars, not currency subunits: send "0.56" for 56 cents and "56.00" for
+56 dollars (got 5600)
+```
+
+That is deliberate. `5600` used to mean $56.00 in cents, and reading it as
+$5,600.00 would be a 100x overprice that passes range validation on a $100
+market, so the server refuses to guess. `quantity` is exempt and still accepts a
+number, because a contract count carries no unit ambiguity.
+
+Any width from zero to seven decimals is accepted - `"0.51"`, `"0.5100"` and
+`"0.510000"` are the same order - and the response echoes it at four. Compare
+prices as decimals, never as strings.
+
+`python/stx.py` and `javascript/stx.mjs` each expose the two helpers the
+examples use: `to_decimal`/`toNumber` to read a field, and
+`dollar_string`/`dollarString` to write one.
+
+JavaScript has no decimal type, so the examples parse to `Number`. That is exact
+enough for the two-decimal quotes these markets trade at, but it is not a money
+type - `0.1 + 0.2` is `0.30000000000000004`. Anything that accumulates, such as
+a running P&L or a cost basis, wants a decimal library. Do not skip the parse and
+lean on coercion either: `"0.61" - 0.1` happens to give `0.51`, but `"0.61" + 0.1`
+is the string `"0.610.1"` and nothing warns you.
+
+#### The ceiling
+
+A market's price ceiling is its own **`max_price`**, not a fixed 99c. US markets
+settle at $1, so `max_price` is `"1.0000"` and quotes run $0.01-$0.99. Canadian
+markets settle at $100 and `max_price` is `"100.0000"`. Read it off the market.
+
+A price at or above the cap is a `422 The order's price must be lower than 1.00`.
+
+#### The WebSocket topics come in both formats
+
+The **dollar-format topics** - `orderbook`, `ticker`, `trades`, `orders:`,
+`fills:`, `positions:`, `settlements:`, `balances:` and `account:` - use exactly
+the format above, so a REST snapshot and a socket delta can be mixed without
+converting anything. Every example here joins those.
+
+The older topics predate the format and were not converted. They still work, but
+they send cents, and one `market:` join reply carries the book twice in two
+different units:
 
 | where | example | unit |
 | --- | --- | --- |
-| REST `market.bids[i].price` | `"0.61"` | decimal dollars, as a string |
 | socket `ob.b[i].p` | `0.61` | decimal dollars, as a number |
 | socket `bids[i].price` | `61` | integer cents |
-| `market.max_price` | `100` | integer cents |
-| `order.price`, on POST and on GET | `61` | integer cents |
+| `active_orders` push `price` | `51` | integer cents |
+| `portfolio` `available_balance` | `1000073` | integer cents |
 
-The socket join reply carries the book twice, in both units: `ob` holds dollars
-and `bids`/`offers` hold cents. Pick one and stay with it.
-
-This means a price read off the book cannot go straight into an order. Say the
-best bid is `"0.54"` and you want to rest an order ten cents below it, at 44c.
-Subtracting from that string raises a `TypeError` in Python. JavaScript is worse,
-because it coerces instead of complaining: `"0.54" - 10` is `-9.46`, which clamps
-to a 1c order rather than the 44c one you meant, and nothing tells you.
-
-Convert to cents first. `python/stx.py` and `javascript/stx.mjs` each expose one
-helper for exactly this, `book_price_cents` and `bookPriceCents`, and every
-example here goes through it.
-
-A market's price ceiling is its own **`max_price`**, not a fixed 99. US markets
-settle at $1, so `max_price` is 100 and quotes run 1-99. Canadian markets settle
-at $100 and `max_price` is 10000. Read it off the market.
-
-The rejection message for a price over the cap reports it in **dollars** while
-the field is in **cents**: `price: 4650` on a $1 market returns
-`422 The order's price must be lower than 1.00`.
+[CHANNELS.md](./CHANNELS.md) documents both families and maps each legacy topic
+onto its replacement. Do not join a topic and its twin on the same socket - you
+receive every update twice, once in each format.
 
 ### Response shapes
 
@@ -396,6 +490,41 @@ optional and only override what the host table resolves: `STX_PROFILE`,
 
 `./configure` and `./verify` read only `STX_DIR` and take everything else from
 the file, so `./verify` ignores a `STX_KEY_ID` you set for the examples.
+
+### Pointing at another host
+
+`STX_EXCHANGE` and `STX_ENVIRONMENT` only choose from the three hosts in the
+table. For anything else - a server on your own machine, a review app -
+set `STX_BASE_URL`, which wins over the pair:
+
+```sh
+STX_BASE_URL=http://localhost:8000 python python/rest/quickstart.py markets
+STX_BASE_URL=http://localhost:8000 node javascript/rest/quickstart.mjs markets
+```
+
+`http` is handled as well as `https`, and the WebSocket URL follows: the socket
+examples connect to `ws://localhost:8000/socket/websocket` without further
+configuration.
+
+`./verify` deliberately reads nothing but `STX_DIR` from the environment, so give
+it a `base_url` line in the profile instead. The Python and JavaScript examples
+read that key too, which is the way to make an override stick:
+
+```ini
+[local]
+base_url = http://localhost:8000
+key_id = <a key registered on that server>
+private_key = ~/.stx/local.pem
+```
+
+Your key has to exist on whatever host you point at - keys belong to one
+environment, so a `demo.stxapp.io` key is not valid against a local server.
+
+**`exchange` and `environment` still apply.** They decide more than the host:
+`roundtrip` and the latency examples refuse to place orders when `environment`
+is `production`. If you point `base_url` at a real exchange, that guard is all
+that stands between an example and a live book, so leave `environment` alone
+unless you mean it.
 
 ### Known issues
 

@@ -12,14 +12,28 @@ Run this in one console and trade in another:
 
 Streams, on a single authenticated socket:
 
-  * the aggregated order book for one market   market:<market_id>
-  * your order state changes                   active_orders:<user_id>
-  * your fills                                 active_trades:<user_id>
-  * your positions and balance                 active_positions, portfolio
-  * your settlements as they realise           active_settlements:<user_id>
+  * the aggregated order book for one market   orderbook
+  * that market's price summary                ticker
+  * your order state changes                   orders:<user_id>
+  * your own executions                        fills:<user_id>
+  * your positions                             positions:<user_id>
+  * your settlements as they realise           settlements:<user_id>
+  * your balances                              balances:<user_id>
 
-The user id in those topics comes from GET /api/v1/me, which this fetches at
-startup - there is no other way to read it.
+These are the dollar-format topics: money arrives as a decimal string in
+dollars, matching /api/v1. The older cents topics (active_orders, active_trades,
+active_positions, active_settlements, portfolio and market:<market_id>) still
+exist but are not used here - see CHANNELS.md.
+
+`orderbook` and `ticker` are single public topics covering every market,
+narrowed by the join payload, so watching ten markets is one join rather than
+ten. They narrow differently, and the difference is worth seeing: `orderbook`
+takes `market_ids` and filters server-side, while `ticker` takes only `sports`
+and `competitions`, so pinning it to one market means filtering client-side as
+well. Both halves are done below.
+
+The user id in the private topics comes from GET /api/v1/me, which this fetches
+at startup - there is no other way to read it.
 
 Requires the packages in python/requirements.txt; ``./install.sh`` puts them in
 python/.venv.
@@ -51,13 +65,23 @@ import stx  # noqa: E402
 # Two independent timers, and the socket heartbeat only resets one of them.
 #
 #   socket keep-alive     `heartbeat` on the `phoenix` topic     60s
-#   cancel_on_disconnect  `ping` on the active_orders topic      whatever you
+#   cancel_on_disconnect  `ping` on the orders: topic            whatever you
 #                                                                asked for
 #
 # Miss the first and the connection closes, which is at least obvious. Miss the
 # second and your flagged orders are cancelled on a connection that is still
 # up, which is not. Both run on their own timers below.
 HEARTBEAT_SECONDS = 20
+
+# `unmatched topic` is the server saying it has never heard of the topic, which
+# on a correct client means the host predates it. Worth naming, because it looks
+# identical to a typo and is the single most likely failure while the
+# dollar-format topics are still rolling out.
+UNMATCHED_TOPIC_HINT = (
+    "\n  'unmatched topic' means the server does not know that topic.\n"
+    "  The dollar-format topics this watcher joins need a host running them;\n"
+    "  older deployments carry only the legacy cents topics. See CHANNELS.md.\n"
+)
 
 # ping_timeout is clamped server-side to 5000-20000 ms. Values outside that are
 # silently pulled to the nearest bound, and a non-integer fails the join with
@@ -88,18 +112,35 @@ def stamp():
 
 def rest_get(config, private_key, path):
     headers = stx.signed_headers(private_key, config["key_id"], "GET", path)
-    response = requests.get(config["base_url"] + path, headers=headers, timeout=15)
+    try:
+        response = requests.get(config["base_url"] + path, headers=headers, timeout=15)
+    except requests.exceptions.ConnectionError as error:
+        sys.exit(stx.unreachable(config["base_url"], error))
     if not response.ok:
         sys.exit(f"GET {path} -> HTTP {response.status_code}: {response.text[:300]}")
     return response.json()
 
 
-def pick_market(config, private_key):
-    """The tradeable market with the deepest book, so there is something to see."""
+def pick_market(config, private_key, wanted=None):
+    """One market to watch, by id or symbol, or the deepest book if not named.
+
+    Always returns the market as the API describes it, never a stub built from
+    the argument. `orderbook` takes UUIDs only - it drops anything that is not
+    one and then rejects the join with `market_ids_required` - and `ticker`
+    needs the market's `sport` and `competition` to narrow on. Neither can be
+    had from a symbol without asking.
+    """
     markets = rest_get(config, private_key, "/api/v1/markets?status=open&limit=200")["markets"]
     live = [m for m in markets if m.get("trading") and m.get("status") == "open"]
     if not live:
         sys.exit("No tradeable market to watch.")
+
+    if wanted:
+        for market in live:
+            if wanted in (market["market_id"], market["symbol"]):
+                return market
+        sys.exit(f"Market {wanted} is not open and tradeable right now.")
+
     return max(live, key=lambda m: len(m.get("bids") or []) + len(m.get("offers") or []))
 
 
@@ -145,19 +186,50 @@ async def order_pings(ws, topic, join_ref, ping_timeout_ms):
 
 
 # ---------------------------------------------------------------------------
-# Rendering. Every price here is integer cents.
+# Rendering. Every price here is a dollar string, as on /api/v1.
 # ---------------------------------------------------------------------------
 
 
 def render_book(payload):
-    book = payload["ob"]
-    bids, offers = book.get("b") or [], book.get("o") or []
-    bid = f"{bids[0]['q']:>6} @ {stx.book_price_cents(bids[0]['p']):>4}c" if bids else " " * 14
-    offer = f"{str(stx.book_price_cents(offers[0]['p'])) + 'c':<5} @ {offers[0]['q']:<6}" if offers else ""
+    """One `book` push from the `orderbook` topic.
+
+    Levels are flat: `bids` and `offers` hold `price`, `quantity`, `liquidity`,
+    `total_quantity` and `total_liquidity`, all dollar or quantity strings. The
+    legacy `market:` topic nested them under `ob.b`/`ob.o` with `p`/`q` keys.
+
+    Every push is a COMPLETE snapshot of that market's book, not a delta.
+    Replace whatever you hold for this market_id rather than merging into it.
+    """
+    bids, offers = payload.get("bids") or [], payload.get("offers") or []
+    bid = f"{bids[0]['quantity']:>7} @ {stx.fmt_money(bids[0]['price']):>6}" if bids else " " * 16
+    offer = f"{stx.fmt_money(offers[0]['price']):<6} @ {offers[0]['quantity']:<7}" if offers else ""
     print(line("BOOK", f"{bid}   |   {offer}   ({len(bids)}x{len(offers)} levels)"))
 
 
+def render_ticker(payload):
+    """One `ticker` push: a whole-market price summary, not a book.
+
+    Complete every time rather than a diff, so there is nothing to merge. It
+    fires when price, the top of book, volume or open interest moves - which
+    includes a new resting level, so an order placed under the touch shows up
+    here as a depth change even though it did not move the price.
+
+    Any field can be null on a market that has not traded or has an empty side.
+    """
+    def shown(key):
+        value = payload.get(key)
+        return "-" if value is None else value
+
+    print(line("MARKET", f"last={stx.fmt_money(payload.get('last_traded_price'))}  "
+                         f"vol={shown('total_volume')}  "
+                         f"oi={shown('open_interest')}  "
+                         f"{shown('bid_depth')}x{shown('offer_depth')}"))
+
+
 # Snapshot events arrive once on join and can carry hundreds of rows. Summarise.
+# The dollar topics keep the legacy event names, so a client that already
+# handles active_orders needs no re-tagging when it moves to orders:.
+# settlements: has no join snapshot; new_settlements arrives as they realise.
 SNAPSHOTS = {
     "all_orders": "orders",
     "all_trades": "trades",
@@ -205,34 +277,51 @@ async def watch(config, private_key, user_id, market, cancel_on_disconnect, ping
     headers = stx.signed_headers(private_key, config["key_id"], "GET", stx.SOCKET_PATH)
     url = f"{config['socket_url']}?vsn=2.0.0"
 
-    market_topic = f"market:{market['market_id']}"
-    orders_topic = f"active_orders:{user_id}"
+    orders_topic = f"orders:{user_id}"
+
+    # topic -> (label, join payload). `orderbook` is the one topic that REQUIRES
+    # a payload: it is public and covers every market, so a join naming no
+    # usable market_id is rejected with {"reason": "market_ids_required"}
+    # rather than quietly subscribing you to the firehose.
+    # `ticker` has no market_ids filter, so narrow it as far as the server
+    # allows and drop the rest below. These values are passed through from the
+    # REST market verbatim: the ticker payload's `sport` and `competition` come
+    # from the same server-side field, so they match without any normalising.
+    ticker_filter = {}
+    if market.get("sport"):
+        ticker_filter["sports"] = [market["sport"]]
+    if market.get("competition"):
+        ticker_filter["competitions"] = [market["competition"]]
+
     topics = {
-        market_topic: "BOOK",
-        orders_topic: "ORDER",
-        f"active_trades:{user_id}": "TRADE",
-        f"active_positions:{user_id}": "POS",
-        f"active_settlements:{user_id}": "SETTLE",
-        f"portfolio:{user_id}": "WALLET",
+        "orderbook": ("BOOK", {"market_ids": [market["market_id"]]}),
+        "ticker": ("MARKET", ticker_filter),
+        orders_topic: ("ORDER", {}),
+        f"fills:{user_id}": ("FILL", {}),
+        f"positions:{user_id}": ("POS", {}),
+        f"settlements:{user_id}": ("SETTLE", {}),
+        f"balances:{user_id}": ("WALLET", {}),
     }
+
+    if cancel_on_disconnect:
+        topics[orders_topic] = ("ORDER", {
+            "cancel_on_disconnect": True,
+            "ping_timeout": ping_timeout_ms,
+        })
 
     # Anything passed with --topic joins on the same socket. The join loop, the
     # label lookup and render_event are all topic-agnostic already, so a topic
     # this file has never heard of prints its frames like any other.
     for topic in extra_topics:
         topics.setdefault(topic.replace("<user_id>", user_id),
-                          topic.split(":")[0].upper())
+                          (topic.split(":")[0].upper(), {}))
+
+    warned = False
 
     async with websockets.connect(url, additional_headers=headers) as ws:
         tasks = [asyncio.create_task(socket_heartbeat(ws))]
 
-        for index, topic in enumerate(topics):
-            payload = {}
-            if topic == orders_topic and cancel_on_disconnect:
-                payload = {
-                    "cancel_on_disconnect": True,
-                    "ping_timeout": ping_timeout_ms,
-                }
+        for index, (topic, (_label, payload)) in enumerate(topics.items()):
             await send(ws, str(index), index, topic, "phx_join", payload)
             if topic == orders_topic and cancel_on_disconnect:
                 tasks.append(asyncio.create_task(
@@ -247,31 +336,59 @@ async def watch(config, private_key, user_id, market, cancel_on_disconnect, ping
         try:
             while True:
                 join_ref, ref, topic, event, payload = json.loads(await ws.recv())
-                label = topics.get(topic, topic.split(":")[0].upper())
+                label = topics.get(topic, (topic.split(":")[0].upper(),))[0]
 
                 if event == "phx_reply":
                     response = payload.get("response") or {}
                     if payload.get("status") != "ok":
-                        print(line("JOIN", f"{label} FAILED: {response}"))
+                        print(line("JOIN", f"{label} FAILED on {topic}: {response}"))
+                        # Printed once, however many topics are missing: on an
+                        # older host every dollar topic fails the same way and
+                        # the reason is the same for all of them.
+                        if response.get("reason") == "unmatched topic" and not warned:
+                            print(UNMATCHED_TOPIC_HINT, file=sys.stderr)
+                            warned = True
                     elif response.get("ping") == "pong":
                         pass                     # cancel_on_disconnect keepalive ack
                     elif response.get("cancel_on_disconnect"):
                         print(line("JOIN", f"{label} ok, cancel_on_disconnect "
                                            f"ping_timeout={response.get('ping_timeout')}ms"))
-                    elif "ob" in response:
-                        # A market: join replies with the current book, so there
-                        # is no need to ask for a snapshot first.
-                        render_book(response)
+                    elif "selected_sports" in response:
+                        # The echo is the only signal that a filter applied. A
+                        # value the server did not recognise is dropped in
+                        # silence and comes back as null, meaning no filter.
+                        print(line("JOIN", f"{label} ok, sports="
+                                           f"{response['selected_sports']} "
+                                           f"competitions="
+                                           f"{response['selected_competitions']}"))
+                    elif "selected_market_ids" in response:
+                        # Echoed by `orderbook` and by the private topics, which
+                        # take the same filter. A mistyped id shows up here
+                        # rather than as silence.
+                        #
+                        # null means NO filter, not an empty one - the private
+                        # topics are joined without market_ids above, so that is
+                        # their normal reply and everything on the account
+                        # arrives. Only `orderbook` requires a non-empty list.
+                        applied = response["selected_market_ids"]
+                        scope = f"markets={len(applied)}" if applied else "no market filter"
+                        print(line("JOIN", f"{label} ok, {scope}"))
                     continue
 
                 if event in ("phx_close", "phx_error"):
-                    # On market:* this also means the market reached a terminal
-                    # status and the server dropped us - not a network fault.
                     print(line(event.upper(), f"on {topic}"))
                     continue
 
-                if event == "order_book_update":
+                if event == "book":
                     render_book(payload)
+                    continue
+
+                if event == "ticker":
+                    # One global topic: every market in the sport arrives here,
+                    # so the market filter that `orderbook` did server-side has
+                    # to be done by hand.
+                    if payload.get("market_id") == market["market_id"]:
+                        render_ticker(payload)
                     continue
 
                 if event in ("presence_state", "presence_diff"):
@@ -303,10 +420,7 @@ def main():
 
     user_id = rest_get(config, private_key, "/api/v1/me")["me"]["user_id"]
 
-    if args.market:
-        market = {"market_id": args.market, "symbol": args.market}
-    else:
-        market = pick_market(config, private_key)
+    market = pick_market(config, private_key, args.market)
 
     try:
         asyncio.run(watch(config, private_key, user_id, market,

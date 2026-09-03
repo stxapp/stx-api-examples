@@ -22,6 +22,7 @@ import os
 import shutil
 import sys
 import time
+from decimal import Decimal
 
 try:
     import requests
@@ -50,13 +51,16 @@ def request(config, private_key, method, path, body=None):
     headers = stx.signed_headers(private_key, config["key_id"], method, path)
     headers["Content-Type"] = "application/json"
 
-    response = requests.request(
-        method,
-        config["base_url"] + path,
-        headers=headers,
-        json=body,
-        timeout=15,
-    )
+    try:
+        response = requests.request(
+            method,
+            config["base_url"] + path,
+            headers=headers,
+            json=body,
+            timeout=15,
+        )
+    except requests.exceptions.ConnectionError as error:
+        sys.exit(stx.unreachable(config["base_url"], error))
 
     if response.status_code == 401:
         sys.exit(
@@ -69,9 +73,11 @@ def request(config, private_key, method, path, body=None):
         )
 
     if not response.ok:
-        # 422 is the exchange rejecting a well-formed, authenticated request -
-        # a price at or above the market's max_price, say. The message is worth
-        # reading in full.
+        # 400 is a malformed request. On POST /api/v1/orders the usual cause is
+        # a `price` sent as a number instead of a dollar string - see
+        # cmd_roundtrip. 422 is the exchange rejecting a well-formed,
+        # authenticated request: a price at or above the market's max_price,
+        # say. Either message is worth reading in full.
         sys.exit(f"HTTP {response.status_code}: {response.text[:500]}")
 
     return response.json()
@@ -85,8 +91,9 @@ def request(config, private_key, method, path, body=None):
 def cmd_me(config, private_key, _args):
     """GET /api/v1/me - the only place your user id is published.
 
-    Private WebSocket topics are scoped by it: active_orders:<user_id>,
-    portfolio:<user_id>, and so on. Fetch it once at startup and hold it.
+    Private WebSocket topics are scoped by it: orders:<user_id>,
+    balances:<user_id>, account:<user_id>, and so on. Fetch it once at startup
+    and hold it.
     """
     me = request(config, private_key, "GET", "/api/v1/me")["me"]
     print(f"user_id     {me['user_id']}")
@@ -134,11 +141,10 @@ def cmd_markets(config, private_key, _args):
     if not markets:
         sys.exit("No tradeable markets right now.")
 
-    # Book prices arrive as decimal-dollar strings ("0.54") while max_price is
-    # integer cents (100), so both go through stx.book_price_cents to be shown
-    # and compared in the same unit. A US market settles at $1, so max_price is
-    # 100 and quotes run 1-99. Canada settles at $100 and max_price is 10000.
-    # Read it off the market, do not assume.
+    # Every price here is a dollar string ("0.6100", "1.0000"), so the column
+    # is a straight format rather than a conversion. A US market settles at $1,
+    # so max_price is "1.0000" and quotes run $0.01-$0.99. Canada settles at
+    # $100 and max_price is "100.0000". Read it off the market, do not assume.
     # Symbols are back-loaded: the leg that distinguishes sibling markets
     # (TOTAL-3_5 from TOTAL-4_5) is in the tail, and --market takes a symbol,
     # so this column has to survive intact. TITLE is last and absorbs the
@@ -151,11 +157,11 @@ def cmd_markets(config, private_key, _args):
     for market in shown:
         bids = market.get("bids") or []
         offers = market.get("offers") or []
-        bid = f"{stx.book_price_cents(bids[0]['price'])}c" if bids else "-"
-        offer = f"{stx.book_price_cents(offers[0]['price'])}c" if offers else "-"
+        bid = stx.fmt_money(bids[0]["price"]) if bids else "-"
+        offer = stx.fmt_money(offers[0]["price"]) if offers else "-"
         print(
             f"{market['symbol']:<{symbol_width}} {bid:>7} {offer:>7} "
-            f"{str(market['max_price']) + 'c':>7}  {(market.get('title') or '')[:title_width]}"
+            f"{stx.fmt_money(market['max_price']):>7}  {(market.get('title') or '')[:title_width]}"
         )
 
     print(f"\n{len(markets)} tradeable of {len(open_markets)} returned by "
@@ -173,12 +179,15 @@ def cmd_orders(config, private_key, _args):
         print("No open orders.")
         return
 
+    # price is a dollar string, or null on a market order. quantity and filled
+    # are strings too ("1.00"), and print as they arrive - a column needs no
+    # conversion. Parse before doing ARITHMETIC on them, as cmd_roundtrip does.
     print(f"{'ID':<38} {'SIDE':<5} {'QTY':>6} {'PRICE':>7} {'FILLED':>7}  STATUS")
     for order in orders:
-        price = f"{order['price']}c" if order.get("price") is not None else "MKT"
+        price = stx.fmt_money(order["price"]) if order.get("price") is not None else "MKT"
         print(
             f"{order['id']:<38} {order['action']:<5} {order['quantity']:>6} "
-            f"{price:>7} {order.get('filled', 0):>7}  {order['status']}"
+            f"{price:>7} {order.get('filled', '0.00'):>7}  {order['status']}"
         )
 
 
@@ -201,23 +210,26 @@ def cmd_roundtrip(config, private_key, args):
         sys.exit("No tradeable market with a bid to price against.")
 
     market = candidates[0]
-    # The book quotes dollars, orders take cents - see stx.book_price_cents.
-    best_bid = stx.book_price_cents(market["bids"][0]["price"])
+    # Decimal, not float: these are exact decimal values and float64 is not.
+    best_bid = stx.to_decimal(market["bids"][0]["price"])
 
-    # Ten cents under the touch, floored at 1c. The ceiling is the market's own
-    # max_price, and the rejection message reports it in DOLLARS while the field
-    # is CENTS: price 4650 on a $1 market returns "The order's price must be
-    # lower than 1.00".
-    price = max(1, best_bid - 10)
+    # Ten cents under the touch, floored at a cent. The ceiling is the market's
+    # own max_price, and going over it is a 422 quoting the cap.
+    price = max(Decimal("0.01"), best_bid - Decimal("0.10"))
 
-    print(f"{market['symbol']}  best bid {best_bid}c, max_price {market['max_price']}c")
-    print(f"placing    BUY 1 @ {price}c")
+    print(f"{market['symbol']}  best bid {stx.fmt_money(best_bid)}, "
+          f"max_price {stx.fmt_money(market['max_price'])}")
+    print(f"placing    BUY 1 @ {stx.fmt_money(price)}")
 
     body = {
         "market_id": market["market_id"],
         "order_type": "limit",
         "action": "buy",
-        "price": price,
+        # A STRING, in dollars. Sending the number 51 is a 400: an integer used
+        # to mean 51 cents, and reading it as $51.00 would be a 100x overprice,
+        # so the server rejects it rather than guessing. quantity is exempt -
+        # a contract count carries no unit ambiguity - and still takes a number.
+        "price": stx.dollar_string(price),
         "quantity": 1,
         # Your own reference, echoed back on the order and on every socket
         # push about it. Use it to tie exchange state to your own.
@@ -227,7 +239,10 @@ def cmd_roundtrip(config, private_key, args):
     # The body is flat. Wrapping it in {"user_order": {...}} returns 400. And a
     # successful placement is a 200, not a 201.
     order = request(config, private_key, "POST", "/api/v1/orders", body)["order"]
-    print(f"placed     {order['id']}  status={order['status']}  filled={order.get('filled', 0)}")
+    # The echoed price is the same order at the server's width: "0.51" in,
+    # "0.5100" back. Compare as decimals, never as strings.
+    print(f"placed     {order['id']}  status={order['status']}  "
+          f"price={order['price']}  filled={order.get('filled', '0.00')}")
 
     cancelled = request(
         config, private_key, "DELETE", f"/api/v1/orders/{order['id']}"

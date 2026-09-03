@@ -8,6 +8,7 @@
 // has two legs:
 //
 //   place    POST   /api/v1/orders        rest a buy limit 10c under the touch
+//                                         (`price` is a dollar string: "0.51")
 //   cancel   DELETE /api/v1/orders/<id>   take that same order back off
 //
 // Both legs are timed the same way - fire the HTTP call, then wait for the order
@@ -37,7 +38,10 @@
 
 import { Socket } from "phoenix";
 import WebSocket from "ws";
-import { loadProfile, signedHeaders, parseArgs, fail, SOCKET_PATH, bookPriceCents } from "../stx.mjs";
+import {
+  loadProfile, signedHeaders, parseArgs, fail, SOCKET_PATH, toNumber, dollarString, fmtMoney,
+  unreachable,
+} from "../stx.mjs";
 
 const BOOK_TIMEOUT_MS = 15_000;
 
@@ -115,14 +119,20 @@ if (rounds < 1) {
 // ---------------------------------------------------------------------------
 
 async function rest(method, path, body) {
-  const response = await fetch(config.baseUrl + path, {
-    method,
-    headers: {
-      ...signedHeaders(config, method, path),
-      "Content-Type": "application/json",
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let response;
+  try {
+    response = await fetch(config.baseUrl + path, {
+      method,
+      headers: {
+        ...signedHeaders(config, method, path),
+        "Content-Type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch (error) {
+    // fetch rejects rather than resolving when the host never answered.
+    fail(unreachable(config.baseUrl, error));
+  }
   if (!response.ok) {
     fail(`${method} ${path} -> HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
   }
@@ -145,13 +155,14 @@ if (args.market) {
   );
 }
 
-// The book quotes dollars, orders take cents - see bookPriceCents.
-const bestBid = bookPriceCents(market.bids[0].price);
+// REST money is a dollar string. Parse before doing arithmetic: `"0.61" - 0.1`
+// happens to work by coercion, but `"0.61" + 0.1` is the string "0.610.1".
+const bestBid = toNumber(market.bids[0].price);
 
 // Well under the touch so it rests rather than fills. A fill would measure the
 // matching engine instead of the book publish, and would leave a position
 // behind.
-const price = Math.max(1, bestBid - 10);
+const price = Math.max(0.01, bestBid - 0.1);
 
 // ---------------------------------------------------------------------------
 // Socket
@@ -171,17 +182,37 @@ const socket = new Socket(config.socketEndpoint, {
 });
 socket.connect();
 
-const channel = socket.channel(`market:${market.market_id}`, {});
+// One public topic for every market, narrowed by the join payload. At least one
+// valid market_id is required: an empty list is a join error, not a
+// subscription to everything.
+const channel = socket.channel("orderbook", { market_ids: [market.market_id] });
+
+// `unmatched topic` is the server saying it has never heard of the topic, which
+// on a correct client means the host predates it. Worth naming, because it looks
+// identical to a typo and is the single most likely failure while the
+// dollar-format topics are still rolling out. python/websockets/latency.py says
+// the same thing on the same failure.
+const UNMATCHED_TOPIC_HINT = `
+  'unmatched topic' means the server does not know this topic.
+  The dollar-format topics (orderbook, ticker, trades, orders:, fills:,
+  positions:, settlements:, balances:, account:) need a host running them;
+  older deployments carry only the legacy cents topics. See CHANNELS.md.
+`;
 
 await new Promise((resolve, reject) => {
   channel
     .join()
     .receive("ok", resolve)
-    .receive("error", (reason) => reject(new Error(JSON.stringify(reason))));
-}).catch((error) => fail(`could not join the market channel: ${error.message}`));
+    .receive("error", reject);
+}).catch((reason) =>
+  fail(
+    `could not join orderbook: ${JSON.stringify(reason)}` +
+      (reason?.reason === "unmatched topic" ? `\n${UNMATCHED_TOPIC_HINT}` : "")
+  )
+);
 
 /**
- * Resolve on the next order_book_update push.
+ * Resolve on the next `book` push.
  *
  * The book publishes on the server's own cadence - roughly every 200 ms - and
  * coalesces changes in between. So the WS figure below is dominated by where in
@@ -191,14 +222,14 @@ await new Promise((resolve, reject) => {
  */
 function nextBookUpdate() {
   return new Promise((resolve, reject) => {
-    const ref = channel.on("order_book_update", () => {
+    const ref = channel.on("book", () => {
       clearTimeout(timer);
-      channel.off("order_book_update", ref);
+      channel.off("book", ref);
       resolve();
     });
     const timer = setTimeout(() => {
-      channel.off("order_book_update", ref);
-      reject(new Error(`no order_book_update within ${BOOK_TIMEOUT_MS}ms`));
+      channel.off("book", ref);
+      reject(new Error(`no book update within ${BOOK_TIMEOUT_MS}ms`));
     }, BOOK_TIMEOUT_MS);
   });
 }
@@ -207,14 +238,17 @@ function nextBookUpdate() {
 // Rounds
 // ---------------------------------------------------------------------------
 
-console.log(`${market.symbol}  best bid ${bestBid}c, quoting ${price}c, ${rounds} round(s)`);
+console.log(
+  `${market.symbol}  best bid ${fmtMoney(bestBid)}, quoting ${fmtMoney(price)}, ${rounds} round(s)`
+);
 console.log(
   `${"ROUND".padEnd(7)} ${"LEG".padEnd(8)} ${"REST".padStart(9)} ${"WS".padStart(9)} ${"TOTAL".padStart(9)}`
 );
 
-// No settle wait here: channel.join() above already resolved on the reply that
-// carries the opening book. order_book_update fires only when the book CHANGES,
-// so waiting for one would just burn BOOK_TIMEOUT_MS on any quiet market.
+// No settle wait here: channel.join() above already resolved on the join reply,
+// which is all the settling needed. `orderbook` sends no book on join, and a
+// `book` push fires only when the book CHANGES, so waiting for one would just
+// burn BOOK_TIMEOUT_MS on any quiet market.
 
 const samples = [];
 let order = null;
@@ -230,7 +264,8 @@ try {
           market_id: market.market_id,
           order_type: "limit",
           action: "buy",
-          price,
+          // A string, in dollars. The number 51 is a 400 - see ../stx.mjs.
+          price: dollarString(price),
           quantity: 1,
           client_order_id: `latency-${Date.now()}`,
         }));

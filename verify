@@ -9,7 +9,7 @@
 # and openssl, no language runtime.
 #
 # Its output also gives you the user_id that private WebSocket channel topics
-# need - active_orders:<user_id> and the rest. There is no other way to read it.
+# need - orders:<user_id> and the rest. There is no other way to read it.
 #
 # POSIX sh. Needs curl and an OpenSSL 3.x `openssl` (see the note by sign()).
 
@@ -23,6 +23,11 @@ PROFILE="${1:-default}"
 # Base URLs. The one table for shell - configure stores `exchange` and
 # `environment`, and this resolves the pair. Nothing else in this repository
 # writes a hostname.
+#
+# A host not in the table - a local server, a review app - goes in the profile
+# as a `base_url` line, which wins over the pair. The Python and JavaScript
+# examples read the same key, and also accept STX_BASE_URL; this script takes
+# everything but STX_DIR from the file, so the key is the way in here.
 # ---------------------------------------------------------------------------
 
 base_url() {
@@ -67,6 +72,7 @@ fi
 
 EXCHANGE=$(profile_value "$CREDENTIALS" exchange)
 ENVIRONMENT=$(profile_value "$CREDENTIALS" environment)
+BASE_URL_OVERRIDE=$(profile_value "$CREDENTIALS" base_url)
 KEY_ID=$(profile_value "$CREDENTIALS" key_id)
 KEY_PATH=$(profile_value "$CREDENTIALS" private_key)
 
@@ -85,7 +91,12 @@ if [ ! -r "$KEY_PATH" ]; then
     exit 1
 fi
 
-BASE_URL=$(base_url "${EXCHANGE:-us}" "${ENVIRONMENT:-integration}")
+if [ -n "$BASE_URL_OVERRIDE" ]; then
+    # Strip any trailing slash: //api/v1 404s on some routers.
+    BASE_URL=$(printf '%s' "$BASE_URL_OVERRIDE" | sed 's:/*$::')
+else
+    BASE_URL=$(base_url "${EXCHANGE:-us}" "${ENVIRONMENT:-integration}")
+fi
 
 for tool in curl openssl; do
     if ! command -v "$tool" >/dev/null 2>&1; then
@@ -195,4 +206,4 @@ if [ "$SCOPE" = "read_only" ]; then
 fi
 
 echo "Private WebSocket topics are scoped by that user id, e.g."
-echo "  active_orders:${USER_ID:-<user_id>}"
+echo "  orders:${USER_ID:-<user_id>}"

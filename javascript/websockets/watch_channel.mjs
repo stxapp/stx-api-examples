@@ -1,14 +1,21 @@
 // Join one channel and print every frame it sends.
 //
-//   node javascript/websockets/watch_channel.mjs --topic markets
-//   node javascript/websockets/watch_channel.mjs --topic 'active_orders:<user_id>'
-//   node javascript/websockets/watch_channel.mjs --topic 'market:<market_id or symbol>'
+//   node javascript/websockets/watch_channel.mjs --topic ticker
+//   node javascript/websockets/watch_channel.mjs --topic 'orders:<user_id>'
+//   node javascript/websockets/watch_channel.mjs --topic 'account:<user_id>'
 //
-// --payload sets the join payload, which the markets channel uses for
-// server-side filtering:
+// --payload sets the join payload. The public topics use it for filtering, and
+// `orderbook` REQUIRES at least one market_id:
 //
-//   node javascript/websockets/watch_channel.mjs --topic markets \
-//     --payload '{"rule_filters": ["home_winner"]}'
+//   node javascript/websockets/watch_channel.mjs --topic orderbook \
+//     --payload '{"market_ids": ["<market_id>"]}'
+//
+//   node javascript/websockets/watch_channel.mjs --topic ticker \
+//     --payload '{"sports": ["baseball"], "competitions": ["MLB"]}'
+//
+// account:<user_id> is the one topic with no legacy twin: it carries orders,
+// fills, positions, settlements and balances on a single join. Do not join it
+// alongside the per-type topics - you would receive everything twice.
 //
 // watch.mjs joins six channels at once and formats the events it recognises.
 // This joins only what you name and prints frames as they arrive, unformatted,
@@ -23,10 +30,12 @@
 // Needs `./install.sh` (or `npm install` in javascript/) for ws.
 
 import WebSocket from "ws";
-import { loadProfile, signedHeaders, parseArgs, argList, fail, SOCKET_PATH } from "../stx.mjs";
+import {
+  loadProfile, signedHeaders, parseArgs, argList, fail, SOCKET_PATH, unreachable,
+} from "../stx.mjs";
 
 // The socket closes after 60s of silence. This is the socket keep-alive, not
-// the cancel_on_disconnect ping, which is a separate timer on active_orders;
+// the cancel_on_disconnect ping, which is a separate timer on orders:;
 // see CHANNELS.md. watch.mjs is the example that negotiates that one.
 const HEARTBEAT_MS = 20_000;
 
@@ -56,9 +65,15 @@ if (typeof joinPayload !== "object" || joinPayload === null || Array.isArray(joi
 console.error(`[${config.profile} -> ${config.baseUrl}]`);
 
 async function get(path) {
-  const response = await fetch(config.baseUrl + path, {
-    headers: signedHeaders(config, "GET", path),
-  });
+  let response;
+  try {
+    response = await fetch(config.baseUrl + path, {
+      headers: signedHeaders(config, "GET", path),
+    });
+  } catch (error) {
+    // fetch rejects rather than resolving when the host never answered.
+    fail(unreachable(config.baseUrl, error));
+  }
   if (!response.ok) fail(`GET ${path} -> HTTP ${response.status}`);
   return response.json();
 }
@@ -94,10 +109,30 @@ ws.on("open", () => {
   timer.unref?.();
 });
 
+// `unmatched topic` is the server saying it has never heard of the topic, which
+// on a correct client means the host predates it - or that the topic is
+// misspelled, which looks identical. Both are worth naming in a tool whose whole
+// job is trying one channel at a time.
+const UNMATCHED_TOPIC_HINT = `
+  'unmatched topic' means the server does not know that topic.
+  Check the spelling against CHANNELS.md - and note that the dollar-format
+  topics need a host running them, while older deployments carry only the
+  legacy cents topics.
+`;
+let warnedUnmatched = false;
+
 ws.on("message", (data) => {
   const [, , topic, event, payload] = JSON.parse(data);
   if (topic === "phoenix") return; // heartbeat acks, not channel traffic
   console.log(`${stamp()}  ${label(topic)} <- ${event}  ${JSON.stringify(payload).slice(0, 400)}`);
+
+  // The raw frame above is the point of this script, so the reason is printed
+  // beside it rather than instead of it. Once per run: on an older host every
+  // dollar topic fails the same way.
+  if (!warnedUnmatched && payload?.response?.reason === "unmatched topic") {
+    console.error(UNMATCHED_TOPIC_HINT);
+    warnedUnmatched = true;
+  }
 });
 
 ws.on("error", (error) => fail(`socket error: ${error.message}`));

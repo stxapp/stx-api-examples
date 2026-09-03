@@ -4,11 +4,13 @@
     python python/websockets/latency.py
     python python/websockets/latency.py --rounds 10 --market <market id or symbol>
 
-Picks a market with a resting book, subscribes to that market's socket topic,
+Picks a market with a resting book, subscribes to the public `orderbook` topic
+for it,
 then repeats a round --rounds times (5 by default, capped at 10). Each round
 has two legs:
 
     place    POST   /api/v1/orders        rest a buy limit 10c under the touch
+                                          (`price` is a dollar string: "0.51")
     cancel   DELETE /api/v1/orders/<id>   take that same order back off
 
 Both legs are timed the same way - fire the HTTP call, then wait for the order
@@ -44,6 +46,7 @@ import os
 import statistics
 import sys
 import time
+from decimal import Decimal
 
 try:
     import requests
@@ -99,9 +102,12 @@ def rounds_and_legs(rounds):
 def rest(config, private_key, method, path, body=None):
     headers = stx.signed_headers(private_key, config["key_id"], method, path)
     headers["Content-Type"] = "application/json"
-    response = requests.request(
-        method, config["base_url"] + path, headers=headers, json=body, timeout=15
-    )
+    try:
+        response = requests.request(
+            method, config["base_url"] + path, headers=headers, json=body, timeout=15
+        )
+    except requests.exceptions.ConnectionError as error:
+        raise SystemExit(stx.unreachable(config["base_url"], error)) from None
     if not response.ok:
         raise RuntimeError(f"{method} {path} -> HTTP {response.status_code}: {response.text[:300]}")
     return response.json()
@@ -122,7 +128,7 @@ def pick_market(config, private_key, market_id=None):
 
 
 async def next_book_update(ws, timeout=BOOK_TIMEOUT_SECONDS):
-    """Wait for the next order_book_update frame, ignoring everything else.
+    """Wait for the next `book` frame, ignoring everything else.
 
     The book publishes on the server's own cadence - roughly every 200 ms - and
     coalesces changes in between. So the WS figure below is dominated by where
@@ -134,19 +140,43 @@ async def next_book_update(ws, timeout=BOOK_TIMEOUT_SECONDS):
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise TimeoutError(f"no order_book_update within {timeout}s")
+            raise TimeoutError(f"no book update within {timeout}s")
         frame = json.loads(await asyncio.wait_for(ws.recv(), timeout=remaining))
-        if frame[3] == "order_book_update":
+        if frame[3] == "book":
             return frame[4]
 
 
-async def join_reply(ws, timeout=BOOK_TIMEOUT_SECONDS):
-    """Wait for the reply to our phx_join, which carries the opening book.
+# `unmatched topic` is the server saying it has never heard of the topic, which
+# on a correct client means the host predates it. Worth naming, because it looks
+# identical to a typo and is the single most likely failure while the
+# dollar-format topics are still rolling out.
+UNMATCHED_TOPIC_HINT = (
+    "  'unmatched topic' means the server does not know this topic.\n"
+    "  The dollar-format topics (orderbook, ticker, trades, orders:, fills:,\n"
+    "  positions:, settlements:, balances:, account:) need a host running them;\n"
+    "  older deployments carry only the legacy cents topics. See CHANNELS.md."
+)
 
-    The book snapshot comes back inside this reply. `order_book_update` fires
-    only when the book CHANGES, so waiting for one of those here would block
-    for the whole timeout on any market that happens to be quiet - which is
-    most of them, most of the time.
+
+def join_error(topic, response):
+    message = f"join rejected for topic {topic!r}: {response}"
+    if isinstance(response, dict) and response.get("reason") == "unmatched topic":
+        message += "\n" + UNMATCHED_TOPIC_HINT
+    return RuntimeError(message)
+
+
+async def join_reply(ws, topic, timeout=BOOK_TIMEOUT_SECONDS):
+    """Wait for the reply to our phx_join, and settle before timing anything.
+
+    The reply carries only `selected_market_ids`, not a book - `orderbook`
+    sends no snapshot on join. This is purely a settle: it confirms the join
+    landed. Waiting for a `book` push instead would block for the whole timeout
+    on any market that happens to be quiet, which is most of them, most of the
+    time.
+
+    A rejected join replies with status "error", not a closed socket. Checking
+    it here turns a bad market_ids payload into one clear message instead of a
+    BOOK_TIMEOUT_SECONDS wait for a push that was never going to arrive.
     """
     deadline = time.monotonic() + timeout
     while True:
@@ -155,7 +185,10 @@ async def join_reply(ws, timeout=BOOK_TIMEOUT_SECONDS):
             raise TimeoutError(f"no join reply within {timeout}s")
         frame = json.loads(await asyncio.wait_for(ws.recv(), timeout=remaining))
         if frame[3] == "phx_reply":
-            return frame[4]
+            reply = frame[4]
+            if reply.get("status") != "ok":
+                raise join_error(topic, reply.get("response") or reply)
+            return reply
 
 
 async def heartbeat(ws, interval=20):
@@ -168,16 +201,22 @@ async def heartbeat(ws, interval=20):
 
 async def run(config, private_key, market, rounds):
     headers = stx.signed_headers(private_key, config["key_id"], "GET", stx.SOCKET_PATH)
-    topic = f"market:{market['market_id']}"
+    # One public topic for every market, narrowed by the join payload. At least
+    # one valid market_id is required: an empty list is a join error, not a
+    # subscription to everything.
+    topic = "orderbook"
+    join_payload = {"market_ids": [market["market_id"]]}
 
-    # The book quotes dollars, orders take cents - see stx.book_price_cents.
-    best_bid = stx.book_price_cents(market["bids"][0]["price"])
+    # REST money is a dollar string. Decimal, not float: these are exact
+    # decimal values and float64 is not.
+    best_bid = stx.to_decimal(market["bids"][0]["price"])
     # Well under the touch so it rests rather than fills. A fill would measure
     # the matching engine instead of the book publish, and would leave a
     # position behind.
-    price = max(1, best_bid - 10)
+    price = max(Decimal("0.01"), best_bid - Decimal("0.10"))
 
-    print(f"{market['symbol']}  best bid {best_bid}c, quoting {price}c, {rounds} round(s)")
+    print(f"{market['symbol']}  best bid {stx.fmt_money(best_bid)}, "
+          f"quoting {stx.fmt_money(price)}, {rounds} round(s)")
     print(f"{'ROUND':<7} {'LEG':<8} {'REST':>9} {'WS':>9} {'TOTAL':>9}")
 
     samples = []
@@ -187,8 +226,8 @@ async def run(config, private_key, market, rounds):
     ) as ws:
         keepalive = asyncio.create_task(heartbeat(ws))
         try:
-            await ws.send(json.dumps(["1", "1", topic, "phx_join", {}]))
-            await join_reply(ws)           # settle: drain the join reply
+            await ws.send(json.dumps(["1", "1", topic, "phx_join", join_payload]))
+            await join_reply(ws, topic)    # settle: drain the join reply
 
             order = None
             try:
@@ -200,7 +239,9 @@ async def run(config, private_key, market, rounds):
                             "market_id": market["market_id"],
                             "order_type": "limit",
                             "action": "buy",
-                            "price": price,
+                            # A string, in dollars. The number 51 is a 400 -
+                            # see javascript/stx.mjs or python/stx.py.
+                            "price": stx.dollar_string(price),
                             "quantity": 1,
                             "client_order_id": f"latency-{int(time.time() * 1000)}",
                         }
@@ -287,6 +328,11 @@ def main():
         asyncio.run(run(config, private_key, market, args.rounds))
     except KeyboardInterrupt:
         print("\nstopped")
+    except (RuntimeError, TimeoutError) as error:
+        # A rejected join or a book that never arrives. Both are ordinary
+        # operational failures, not bugs, so report them as one line rather
+        # than a traceback.
+        sys.exit(str(error))
 
 
 if __name__ == "__main__":

@@ -13,6 +13,13 @@
 # expired market and stale prices, which is fine: it exists to show the shape of
 # the two-terminal loop. Re-record only if the scripts' output format changes
 # enough that the recording misleads.
+#
+# Timing note: the watcher joins `orderbook` and `ticker`, and NEITHER sends
+# anything on join - the first BOOK line waits for the next book tick, and
+# MARKET only fires when the price, book top, volume or open interest moves,
+# which a resting order ten cents under the touch does not do. Expect no MARKET
+# row in the recording. The sleep below is longer than the old `market:` topic
+# needed, because that one replied with the book on join.
 
 Output docs/watch-roundtrip.gif
 
@@ -55,7 +62,7 @@ Sleep 500ms
 
 # Left pane: the watcher.
 Type "python python/websockets/watch.py --market $SYM" Enter
-Sleep 9s
+Sleep 12s
 
 # Right pane: place and cancel.
 Ctrl+b

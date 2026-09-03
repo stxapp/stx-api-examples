@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b7f1c0de-0000-4000-8000-5f7a9b1c2d00",
     "name": "STX REST API (/api/v1)",
-    "description": "The STX exchange REST API.\n\nEvery route requires an Ed25519 signature. Postman's script sandbox has no Ed25519 implementation, so the signature cannot be computed here: set the `timestamp` and `signature` collection variables per request with the openssl one-liner in postman/README.md, or use ./verify, javascript/rest/quickstart.mjs or python/rest/quickstart.py, which sign for you.\n\nPrices use two representations. Orders take integer cents (`price: 54`), and that is what GET /api/v1/orders returns. Book and quote prices come back as decimal-dollar strings (`\"0.54\"`), so convert before doing arithmetic against the touch. A market's ceiling is its own max_price in cents (100 on a US $1 market, 10000 on a Canadian $100 market), not a fixed 99.",
+    "description": "The STX exchange REST API.\n\nEvery route requires an Ed25519 signature. Postman's script sandbox has no Ed25519 implementation, so the signature cannot be computed here: set the `timestamp` and `signature` collection variables per request with the openssl one-liner in postman/README.md, or use ./verify, javascript/rest/quickstart.mjs or python/rest/quickstart.py, which sign for you.\n\nMoney and quantities are fixed-point decimal strings, in dollars: `price: \"0.5400\"`, `max_price: \"1.0000\"`, `quantity: \"1.00\"`. Never cents, never a JSON number. The width is a minimum, not a promise - an order price can carry seven decimals - so parse with a variable-scale decimal type. `price_change24h` is a percentage and stays a number. A market's ceiling is its own max_price (`\"1.0000\"` on a US $1 market, `\"100.0000\"` on a Canadian $100 one), not a fixed 99.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -205,10 +205,10 @@
                 "orders"
               ]
             },
-            "description": "Returns 200 (not 201) as {\"order\": {...}}.\n\nThe body is FLAT: wrapping it in {\"user_order\": {...}} returns 400.\n\n`price` is a whole number of cents, strictly below the market's max_price. A rejection reports the cap in DOLLARS while the field is CENTS: price 4650 on a $1 market returns 422 \"The order's price must be lower than 1.00\".\n\nNeeds a read_write key.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}.",
+            "description": "Returns 200 (not 201) as {\"order\": {...}}.\n\nThe body is FLAT: wrapping it in {\"user_order\": {...}} returns 400.\n\n`price` is a dollar amount as a STRING, strictly greater than 0 and below the market's max_price. Sending a number is a 400: an integer used to mean cents, and reading 51 as $51.00 would be a 100x overprice, so the server rejects it rather than guessing. Any width from 0 to 7 decimals is accepted - `\"0.42\"`, `\"0.4200\"` and `\"0.42000\"` are the same order - and the response echoes it at 4. `quantity` is exempt and still takes a number or a string. A price over the cap is 422 \"The order's price must be lower than 1.00\".\n\nNeeds a read_write key.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"market_id\": \"{{market_id}}\",\n  \"order_type\": \"limit\",\n  \"action\": \"buy\",\n  \"price\": 42,\n  \"quantity\": 5,\n  \"client_order_id\": \"postman-1\"\n}",
+              "raw": "{\n  \"market_id\": \"{{market_id}}\",\n  \"order_type\": \"limit\",\n  \"action\": \"buy\",\n  \"price\": \"0.42\",\n  \"quantity\": 5,\n  \"client_order_id\": \"postman-1\"\n}",
               "options": {
                 "raw": {
                   "language": "json"

@@ -146,15 +146,11 @@ async def next_book_update(ws, timeout=BOOK_TIMEOUT_SECONDS):
             return frame[4]
 
 
-# `unmatched topic` is the server saying it has never heard of the topic, which
-# on a correct client means the host predates it. Worth naming, because it looks
-# identical to a typo and is the single most likely failure while the
-# dollar-format topics are still rolling out.
+# `unmatched topic` is the server saying it has never heard of the topic. Worth
+# naming, because it looks identical to a typo.
 UNMATCHED_TOPIC_HINT = (
     "  'unmatched topic' means the server does not know this topic.\n"
-    "  The dollar-format topics (orderbook, ticker, trades, orders:, fills:,\n"
-    "  positions:, settlements:, balances:, account:) need a host running them;\n"
-    "  older deployments carry only the legacy cents topics. See CHANNELS.md."
+    "  Check the spelling against CHANNELS.md."
 )
 
 
@@ -242,7 +238,7 @@ async def run(config, private_key, market, rounds):
                             # A string, in dollars. The number 51 is a 400 -
                             # see javascript/stx.mjs or python/stx.py.
                             "price": stx.dollar_string(price),
-                            "quantity": 1,
+                            "quantity": "1",
                             "client_order_id": f"latency-{int(time.time() * 1000)}",
                         }
                         order = rest(config, private_key, "POST", "/api/v1/orders", body)["order"]

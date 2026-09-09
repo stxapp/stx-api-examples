@@ -1,15 +1,11 @@
 # WebSocket channels
 
 Every channel the STX socket exposes, with the frame to join it and the payload
-it sends. The legacy payloads are captured from `demo.stxapp.io`; the
-dollar-format ones are built from the server's serializers, which that host does
-not yet run.
+it sends. Public payloads are captured from `demo.stxapp.io`; private ones are
+shortened to the fields worth showing.
 
-There are two families. The **dollar-format topics** send money as a decimal
-string in dollars, matching `/api/v1` field for field, and are what every example
-in this repository joins. The **legacy topics** send integer cents; they still
-work and are not deprecated, but nothing here uses them and new code should not
-start there. Each legacy topic names its replacement.
+Money is a decimal string in dollars, matching `/api/v1` field for field, so a
+REST snapshot and a socket delta can be mixed without converting anything.
 
 One authenticated socket carries all of them. Sign the handshake and join
 whatever you need on that one connection: `python/websockets/watch.py` joins
@@ -40,7 +36,7 @@ and prints whatever comes back unformatted.
 
 ```sh
 python python/websockets/watch_channel.py --topic ticker --topic 'balances:<user_id>'
-node javascript/websockets/watch_channel.mjs --topic market_updates
+node javascript/websockets/watch_channel.mjs --topic trades
 ```
 
 `--payload` sets the join payload, which the public topics use for filtering:
@@ -114,41 +110,34 @@ The heartbeat is not on any channel. It goes to the `phoenix` topic with a null
 
 **Reuse the `join_ref`.** A message to a topic must carry the same `join_ref`
 you used to join it, or the server ignores it silently. This is the usual reason
-`request_snapshot` appears to do nothing.
+a `select_market_ids` or a `ping` appears to do nothing.
 
 **A quiet market publishes nothing.** Book updates are emitted when the book
-changes, so silence is not a broken connection. Use `request_snapshot` after any
-reconnect rather than waiting for a tick.
+changes, so silence is not a broken connection. There is no snapshot on demand,
+so after a reconnect read `GET /api/v1/markets` for the current book rather than
+waiting for the next tick.
 
-## Dollar-format topics
+## Topics
 
 Money is a decimal string in dollars, quantities are strings, and counts stay
 plain integers - the same wire format as `/api/v1`. See
 [Prices](./GETTING_STARTED.md#prices).
 
-Five of these replace a legacy topic one for one: same events, same join rules,
-same payload keys, different number format. `balances:` is the exception, and
-`account:` has no legacy twin.
-
-| Legacy topic | Dollar topic | Differences beyond the format |
+| Topic | Scope | What it carries |
 | --- | --- | --- |
-| `market:<market_id>` | `orderbook` + `ticker` | one topic for all markets, no join snapshot; the book and the market summary are split |
-| `active_orders:<user_id>` | `orders:<user_id>` | none |
-| `active_trades:<user_id>` | `fills:<user_id>` | none |
-| `active_positions:<user_id>` | `positions:<user_id>` | none |
-| `active_settlements:<user_id>` | `settlements:<user_id>` | none |
-| `portfolio:<user_id>` | `balances:<user_id>` | different join event and field list |
-| - | `account:<user_id>` | the five private topics on one join |
-| - | `ticker` | public per-market price summary |
-| - | `trades` | public market-wide executions |
+| `orderbook` | public | aggregated book, every market on one topic |
+| `ticker` | public | per-market price summary |
+| `trades` | public | market-wide executions, anonymous |
+| `orders:<user_id>` | private | your orders |
+| `fills:<user_id>` | private | your executions |
+| `positions:<user_id>` | private | your positions |
+| `settlements:<user_id>` | private | your realised profit and loss |
+| `balances:<user_id>` | private | your balances |
+| `account:<user_id>` | private | the five private topics on one join |
+| `user_info:<user_id>` | private | account and profile changes |
 
-**Do not join a topic and its legacy twin on the same socket.** You will receive
-every update twice, once in each format.
-
-`user_info:` has no dollar topic because it carries no monetary values.
-
-The public payloads below are captured from `demo.stxapp.io`, like the legacy
-ones. The private payloads are shortened to the fields worth showing.
+**Do not join `account:` and a per-type topic on the same socket.** You will
+receive every update twice.
 
 ### `orderbook` - aggregated book, public
 
@@ -244,14 +233,10 @@ Sides are named `offer`, not `ask`, matching the REST market payload.
 **No snapshot on join.** This is a change feed: nothing arrives until a market
 moves. Fetch `GET /api/v1/markets` for the initial state.
 
-`ticker` is close to the legacy `markets` channel in shape - one global topic, no
-id in the topic string, narrowed by the join payload - but it answers a different
-question. `markets` is a **discovery** feed: `market_created` and
-`market_updated`, keyed by market id, carrying a diff of whichever fields
-changed. `ticker` is a **price summary**: a fixed field set, complete every push,
-only when the price, book top, volume or open interest moved. Nothing in the
-dollar family reports a market being created, so `markets` remains the only way
-to notice one appearing without polling.
+`ticker` is a **price summary**, not a discovery feed: a fixed field set,
+complete on every push, sent only when the price, book top, volume or open
+interest moved. Nothing on this socket reports a market being *created*, so poll
+`GET /api/v1/markets` to notice one appearing.
 
 Note also that `ticker` has no `market_ids` filter. Watching one market means
 narrowing by sport or competition and then dropping the rest on `market_id`
@@ -287,6 +272,10 @@ carried.
 **`trades` is not `fills:<user_id>`.** This is every trader's executions; `fills:`
 is yours. They differ by one letter and are not interchangeable.
 
+There is no REST equivalent. `trades` is WebSocket-only and market-wide;
+`GET /api/v1/fills` returns your own executions and nobody else's, so
+market-wide flow has to be streamed from here.
+
 ### Filters on the public topics
 
 Every filter follows one contract:
@@ -315,8 +304,7 @@ which market you are watching. A user id that is not yours fails the join with
 python python/websockets/watch_channel.py --topic 'orders:<user_id>'
 ```
 
-`all_orders` on join, then `new_open_order` per change - the same event names
-`active_orders:` uses, so migrating needs no re-tagging:
+`all_orders` on join, then `new_open_order` per change:
 
 ```json
 {"id": "324e4890-e7c2-4e6f-bff4-5059ab3daf34", "status": "cancelled",
@@ -339,8 +327,8 @@ python python/websockets/watch_channel.py --topic 'fills:<user_id>'
 ```
 
 `all_trades` on join, then `trade`. `total_fee` is the all-in fee, trade fee plus
-settlement fee, so a REST snapshot and a delta from here can be mixed;
-`trade_fee` is sent separately for the on-trade component.
+settlement fee, so a `GET /api/v1/fills` snapshot and a delta from here can be
+mixed; `trade_fee` is sent separately for the on-trade component.
 
 ### `positions:<user_id>` - your positions
 
@@ -371,9 +359,8 @@ python python/websockets/watch_channel.py --topic 'settlements:<user_id>'
 
 ### `balances:<user_id>` - balances
 
-The one dollar topic that is not a drop-in for its legacy twin. It differs from
-`portfolio:` in three ways: **the join event is `balances`, not `summary`**; it
-carries no gaming fields; and it takes an optional `account_id`.
+**The join event is `balances`**, not `summary`. Carries no gaming fields, and
+takes an optional `account_id`.
 
 ```json
 ["7", "7", "balances:<user_id>", "phx_join", {}]
@@ -384,8 +371,8 @@ carries no gaming fields; and it takes an optional `account_id`.
 python python/websockets/watch_channel.py --topic 'balances:<user_id>'
 ```
 
-A user may hold more than one account and `portfolio:` can only ever serve the
-first; name one here to reach another. An account that is not yours is rejected
+A user may hold more than one account, and an unfiltered join serves the first;
+name one here to reach another. An account that is not yours is rejected
 as `unauthorized`, which never reveals whether it exists. Join twice, once per
 account, and each socket receives only its own account's frames.
 
@@ -412,8 +399,8 @@ prices yourself.
 
 ### `account:<user_id>` - all five on one join
 
-No legacy twin. Carries everything the five private topics above carry, with the
-same events and payloads - a subscription convenience, not a different feed.
+Carries everything the five private topics above carry, with the same events and
+payloads - a subscription convenience, not a different feed.
 
 ```json
 ["8", "8", "account:<user_id>", "phx_join", {}]
@@ -452,310 +439,14 @@ listed here for completeness rather than shown.
 python python/websockets/watch_channel.py --topic 'user_info:<user_id>'
 ```
 
-## Legacy cents topics
-
-Everything below still works and is not deprecated, but it sends integer cents
-and no example here joins it. Each section names its replacement above. New code
-should start with the dollar topics.
-
-### `market:<market_id>` - one market's book
-
-Superseded by [`orderbook`](#orderbook---aggregated-book-public).
-
-One market's order book and market-info stream.
-
-```json
-["0", "0", "market:a7f9bdfb-7702-44bd-b4d9-6eee282f6041", "phx_join", {}]
-```
-
-```sh
-python python/websockets/watch_channel.py --topic 'market:<market_id or symbol>'
-```
-
-The join reply is not an acknowledgement: it carries the whole market, 51 keys
-including the opening book. This is why `latency.py` settles on the join reply
-rather than waiting for a push, and why a quiet market still gives you a book
-immediately.
-
-```json
-{"ob": {"b": [{"p": 0.61, "q": 491.0, "l": 299.51, "tc": 491.0, "tl": 299.51}],
-        "o": [{"p": 0.66, "q": 882.0, "l": 582.12, "tc": 882.0, "tl": 582.12}]},
- "bids": [{"quantity": 491, "price": 61}],
- "last_traded_price": null,
- "status": "open", "trading": true, "max_price": 100}
-```
-
-Book levels are in fill order, best first. `p` price, `q` contracts, `l`
-liquidity (`q x p`), `tc` and `tl` the cumulative contracts and liquidity
-through this level. Note `ob` is in dollars and `bids` is in cents.
-
-**These are not REST's units.** The topics in this file predate the dollar-string
-format and were not converted: they still send cents, while every money and
-quantity field on `/api/v1` is now a decimal string in dollars. The same market
-reports `max_price` as `100` in the payload above and as `"1.0000"` over REST.
-[Prices](./GETTING_STARTED.md#prices) puts the two side by side. Do not carry a
-number from one into the other.
-
-Then two ongoing events:
-
-- **`order_book_update`** carries the same `ob` shape, on the server's cadence
-  of roughly 200 ms, and only while the book is changing.
-- **`market_update`** carries a market-info diff, roughly every two seconds:
-  status, last traded price, volume, probability.
-
-Client to server, on this topic only:
-
-```json
-["0", "snap", "market:<market_id>", "request_snapshot", {}]
-```
-
-The server immediately pushes the current book and market state. Use it after
-every reconnect instead of waiting for a tick. Neither example sends it, since
-both take the book from the join reply.
-
-Markets in `pre_open`, `open`, `closed` and `cancelled` are joinable. A resulted
-or voided market sends one final `market_update` and then the server drops the
-socket, which arrives as `phx_close`. That is a terminal status, not a network
-fault.
-
-### `markets` - markets appearing and changing
-
-No id in the topic. This is the discovery channel: it tells you when markets
-are created or updated, so you notice a market opening without polling.
-
-```json
-["1", "1", "markets", "phx_join", {}]
-```
-
-```sh
-python python/websockets/watch_channel.py --topic 'markets'
-```
-
-The join reply describes the server-side filtering it supports:
-
-```json
-{"selected_message_types": ["market_updated", "market_created"],
- "selected_rule_filters": null,
- "available_rules": ["ad_hoc_rule", "away_winner", "home_winner",
-                     "event_stat_line", "combo_rule", "..."]}
-```
-
-`available_rules` lists around sixty market rules. Pass filters in the join
-payload and the server pushes only what you asked for, rather than every market
-change:
-
-```json
-["1", "1", "markets", "phx_join",
- {"rule_filters": ["home_winner"], "message_types": ["market_updated"]}]
-```
-
-```sh
-python python/websockets/watch_channel.py --topic markets \
-  --payload '{"rule_filters": ["home_winner"], "message_types": ["market_updated"]}'
-```
-
-which the server confirms by echoing back what it accepted:
-
-```json
-{"selected_rule_filters": ["home_winner"],
- "selected_message_types": ["market_updated"]}
-```
-
-**The keys you send are not the keys you get back.** Send `rule_filters` and
-`message_types`; the reply reports them as `selected_rule_filters` and
-`selected_message_types`. Sending the `selected_` names is accepted and then
-ignored.
-
-Read that echo, because nothing here fails loudly. A misspelled rule, an event
-name that does not exist, or a bare string where an array belongs are all
-dropped in silence, and the reply comes back with `selected_rule_filters: null`,
-meaning no filter at all. You asked to narrow the stream and quietly got every
-market instead. The defaults are `null` rules and both message types.
-
-Events are `market_updated` and `market_created`. The payload is keyed by market
-id rather than being a flat object:
-
-```json
-{"6a6052f9-0d32-417c-a63e-98d68c10e514": { ... changed fields ... }}
-```
-
-A diff carries a `market_id` and `timestamp` plus whichever fields changed.
-Status changes push immediately, the rest are batched.
-
-`market_updates` is a separate joinable topic on the same theme. Note the
-plural: joining `market_update` singular fails with
-`{"reason": "unmatched topic"}`, which is easy to hit because `market_update`
-**is** a valid event name on `market:<market_id>`. Same string, two meanings.
-
-### `active_orders:<user_id>` - your orders
-
-Superseded by [`orders:<user_id>`](#ordersuser_id---your-orders).
-
-Scoped by user, not by market, so it fires for every order you have regardless
-of which market you are watching. A user id that is not yours fails the join
-with `unauthorized`.
-
-```json
-["4", "4", "active_orders:<user_id>", "phx_join", {}]
-```
-
-```sh
-python python/websockets/watch_channel.py --topic 'active_orders:<user_id>'
-```
-
-`all_orders` arrives once on join and is the authoritative state:
-
-```json
-{"orders": []}
-```
-
-Then `new_open_order` on every state change, carrying the whole order each time,
-not just new ones:
-
-```json
-{"id": "324e4890-e7c2-4e6f-bff4-5059ab3daf34", "status": "cancelled",
- "action": "buy", "price": 51, "quantity": 1, "filled": 0,
- "client_order_id": "quickstart-1788208870",
- "cancellation_reason": "by_player", "rejection_reason": null}
-```
-
-`price` is integer cents here, unlike the book and unlike the same order read
-back over REST, where it is `"0.5100"`. `client_order_id` is echoed back
-on every event, so you can reconcile against your own records without storing
-exchange ids.
-
-This is also the only channel that takes join options:
-
-```json
-["4", "4", "active_orders:<user_id>", "phx_join",
- {"cancel_on_disconnect": true, "ping_timeout": 10000}]
-```
-
-The reply echoes what the server actually accepted, which may be clamped, so use
-the echoed value rather than the one you asked for:
-
-```json
-{"cancel_on_disconnect": true, "ping_timeout": 10000}
-```
-
-`ping_timeout` is clamped to 5000-20000 ms; a non-integer fails the join with
-`{"ping_timeout": "Must be an integer"}`. Keep it alive with a `ping` on this
-topic, on a timer at about half the negotiated timeout:
-
-```json
-["4", "42", "active_orders:<user_id>", "ping", {}]
-```
-
-which replies `{"ping": "pong", "ttl": 10000}`.
-
-Three things about `cancel_on_disconnect` that surprise people. Orders must also
-carry the flag themselves; unflagged orders are never auto-cancelled. If several
-sockets have joined, cancellation fires only once all of them are gone. And a
-deliberate close behaves like a drop, which gives you a reconnect window rather
-than an immediate cancel.
-
-### `active_trades:<user_id>` - your fills
-
-Superseded by [`fills:<user_id>`](#fillsuser_id---your-executions).
-
-Your fill stream. Take fills from here rather than polling.
-
-```json
-["5", "5", "active_trades:<user_id>", "phx_join", {}]
-```
-
-```sh
-python python/websockets/watch_channel.py --topic 'active_trades:<user_id>'
-```
-
-```json
-{"trades": []}
-```
-
-`all_trades` on join, then one event per fill. The examples bind `new_trade`;
-older documentation called it `trade`. Neither name was observed during writing,
-because confirming it needs a fill rather than a resting order, so treat the
-ongoing event name as the one thing on this page that has not been verified
-against the server.
-
-### `active_positions:<user_id>` - your positions
-
-Superseded by [`positions:<user_id>`](#positionsuser_id---your-positions).
-
-Your open positions.
-
-```json
-["6", "6", "active_positions:<user_id>", "phx_join", {}]
-```
-
-```sh
-python python/websockets/watch_channel.py --topic 'active_positions:<user_id>'
-```
-
-`all_positions` on join, then **`updated_positions`** as they change:
-
-```json
-{"positions": [{"id": "a7f9bdfb-7702-44bd-b4d9-6eee282f6041",
-                "position": 0,
-                "market_id": "a7f9bdfb-7702-44bd-b4d9-6eee282f6041",
-                "event_id": "1f7d2e61-14ca-45f8-8966-0c25bbc75b96",
-                "buy_order_liability": 0}]}
-```
-
-A position row arrives with `position` at 0 while you have only resting orders;
-`buy_order_liability` is what those orders have committed.
-
-### `active_settlements:<user_id>` - realised profit and loss
-
-Superseded by [`settlements:<user_id>`](#settlementsuser_id---realised-profit-and-loss).
-
-Where realised P&L shows up, when a position closes or a market resolves. Take it from here rather than polling.
-
-```json
-["7", "7", "active_settlements:<user_id>", "phx_join", {}]
-```
-
-```sh
-python python/websockets/watch_channel.py --topic 'active_settlements:<user_id>'
-```
-
-`all_settlements` on join and `new_settlements` as they are created, both
-carrying a `settlements` list. An account with no settlements receives no
-snapshot at all on join, so absence is not an error.
-
-### `portfolio:<user_id>` - balance
-
-Superseded by [`balances:<user_id>`](#balancesuser_id---balances).
-
-Available balance is delivered here. If your risk controls need balance, take
-it from this channel.
-
-```json
-["8", "8", "portfolio:<user_id>", "phx_join", {}]
-```
-
-```sh
-python python/websockets/watch_channel.py --topic 'portfolio:<user_id>'
-```
-
-`summary` on join, then **`update`** as it changes:
-
-```json
-{"available_balance": 1000073, "account_balance": 1000073,
- "buy_order_liability": 0, "sell_order_liability": 0,
- "fee_schedule": "on_trade", "loyalty_tier": "rookie"}
-```
-
-Balances are integer cents. The server does not compute portfolio market value;
-combine positions with market prices yourself.
-
 ## Reconnecting
 
 A dropped socket loses state silently, so treat a reconnect as a cold start:
 
 1. Re-sign the handshake. The old timestamp is outside the 30-second window.
 2. Rejoin every topic, with fresh `join_ref`s.
-3. Send `request_snapshot` on each `market:` topic.
-4. Restart both timers, the `phoenix` heartbeat and the `active_orders` `ping`.
+3. Read `GET /api/v1/markets` for the current book; `orderbook` sends no
+   snapshot on join and none on demand.
+4. Restart both timers, the `phoenix` heartbeat and the `orders:` `ping`.
 5. Reconcile from `all_orders`, `all_trades` and `all_positions`. They are the
    authoritative state; do not assume your in-memory view survived the gap.

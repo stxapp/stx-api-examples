@@ -63,9 +63,9 @@ selects another.
   signed request just as much as placing an order does.
 - **REST money and quantities are dollar strings.** `price: "0.5400"`,
   `max_price: "1.0000"`, `quantity: "1.00"` - never cents, never a JSON number.
-  On `POST /api/v1/orders`, `price` must be a string; a number is a `400`. The
-  dollar-format WebSocket topics match it field for field; the older topics still
-  send cents. [Prices](./GETTING_STARTED.md#prices) lays out both.
+  On `POST /api/v1/orders`, `price` and `quantity` must both be strings; a
+  number is a `400`. The WebSocket topics match REST field for field.
+  [Prices](./GETTING_STARTED.md#prices) has the detail.
 - **The JavaScript REST examples have no dependencies.** Node has Ed25519 in
   `node:crypto` and `fetch` built in. Only the WebSocket examples use packages.
   Python needs `cryptography`, `requests` and `websockets`, which `./install.sh`

@@ -19,11 +19,11 @@
 //   node javascript/websockets/watch_channel.mjs --topic ticker \
 //     --payload '{"sports": ["baseball"], "competitions": ["MLB"]}'
 //
-// account:<user_id> is the one topic with no legacy twin: it carries orders,
-// fills, positions, settlements and balances on a single join. Do not join it
-// alongside the per-type topics - you would receive everything twice.
+// account:<user_id> carries orders, fills, positions, settlements and balances
+// on a single join. Do not join it alongside the per-type topics - you would
+// receive everything twice.
 //
-// watch.mjs joins six channels at once and formats the events it recognises.
+// watch.mjs joins seven channels at once and formats the events it recognises.
 // This joins only what you name and prints frames as they arrive, unformatted,
 // which is what you want when working through CHANNELS.md one channel at a time.
 //
@@ -61,7 +61,7 @@ const config = loadProfile(args.profile);
 const topics = argList(args.topic);
 const maxChars = args.full ? null : DEFAULT_MAX_CHARS;
 if (topics.length === 0) {
-  fail("--topic is required, e.g. --topic markets");
+  fail("--topic is required, e.g. --topic ticker");
 }
 
 let joinPayload = {};
@@ -122,14 +122,11 @@ ws.on("open", () => {
 });
 
 // `unmatched topic` is the server saying it has never heard of the topic, which
-// on a correct client means the host predates it - or that the topic is
-// misspelled, which looks identical. Both are worth naming in a tool whose whole
+// on a correct client means it is misspelled. Worth naming in a tool whose whole
 // job is trying one channel at a time.
 const UNMATCHED_TOPIC_HINT = `
   'unmatched topic' means the server does not know that topic.
-  Check the spelling against CHANNELS.md - and note that the dollar-format
-  topics need a host running them, while older deployments carry only the
-  legacy cents topics.
+  Check the spelling against CHANNELS.md.
 `;
 let warnedUnmatched = false;
 
@@ -147,8 +144,8 @@ ws.on("message", (data) => {
   console.log(`${stamp()}  ${label(topic)} <- ${event}  ${shown}`);
 
   // The raw frame above is the point of this script, so the reason is printed
-  // beside it rather than instead of it. Once per run: on an older host every
-  // dollar topic fails the same way.
+  // beside it rather than instead of it. Once per run: every unknown topic
+  // fails the same way.
   if (!warnedUnmatched && payload?.response?.reason === "unmatched topic") {
     console.error(UNMATCHED_TOPIC_HINT);
     warnedUnmatched = true;

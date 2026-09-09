@@ -20,10 +20,8 @@ Streams, on a single authenticated socket:
   * your settlements as they realise           settlements:<user_id>
   * your balances                              balances:<user_id>
 
-These are the dollar-format topics: money arrives as a decimal string in
-dollars, matching /api/v1. The older cents topics (active_orders, active_trades,
-active_positions, active_settlements, portfolio and market:<market_id>) still
-exist but are not used here - see CHANNELS.md.
+Money arrives as a decimal string in dollars, matching /api/v1 - see
+CHANNELS.md.
 
 `orderbook` and `ticker` are single public topics covering every market,
 narrowed by the join payload, so watching ten markets is one join rather than
@@ -73,14 +71,11 @@ import stx  # noqa: E402
 # up, which is not. Both run on their own timers below.
 HEARTBEAT_SECONDS = 20
 
-# `unmatched topic` is the server saying it has never heard of the topic, which
-# on a correct client means the host predates it. Worth naming, because it looks
-# identical to a typo and is the single most likely failure while the
-# dollar-format topics are still rolling out.
+# `unmatched topic` is the server saying it has never heard of the topic. Worth
+# naming, because it looks identical to a typo.
 UNMATCHED_TOPIC_HINT = (
     "\n  'unmatched topic' means the server does not know that topic.\n"
-    "  The dollar-format topics this watcher joins need a host running them;\n"
-    "  older deployments carry only the legacy cents topics. See CHANNELS.md.\n"
+    "  Check the spelling against CHANNELS.md.\n"
 )
 
 # ping_timeout is clamped server-side to 5000-20000 ms. Values outside that are
@@ -194,8 +189,7 @@ def render_book(payload):
     """One `book` push from the `orderbook` topic.
 
     Levels are flat: `bids` and `offers` hold `price`, `quantity`, `liquidity`,
-    `total_quantity` and `total_liquidity`, all dollar or quantity strings. The
-    legacy `market:` topic nested them under `ob.b`/`ob.o` with `p`/`q` keys.
+    `total_quantity` and `total_liquidity`, all dollar or quantity strings.
 
     Every push is a COMPLETE snapshot of that market's book, not a delta.
     Replace whatever you hold for this market_id rather than merging into it.
@@ -227,8 +221,6 @@ def render_ticker(payload):
 
 
 # Snapshot events arrive once on join and can carry hundreds of rows. Summarise.
-# The dollar topics keep the legacy event names, so a client that already
-# handles active_orders needs no re-tagging when it moves to orders:.
 # settlements: has no join snapshot; new_settlements arrives as they realise.
 SNAPSHOTS = {
     "all_orders": "orders",
@@ -342,9 +334,8 @@ async def watch(config, private_key, user_id, market, cancel_on_disconnect, ping
                     response = payload.get("response") or {}
                     if payload.get("status") != "ok":
                         print(line("JOIN", f"{label} FAILED on {topic}: {response}"))
-                        # Printed once, however many topics are missing: on an
-                        # older host every dollar topic fails the same way and
-                        # the reason is the same for all of them.
+                        # Printed once, however many topics are missing: the
+                        # reason is the same for all of them.
                         if response.get("reason") == "unmatched topic" and not warned:
                             print(UNMATCHED_TOPIC_HINT, file=sys.stderr)
                             warned = True

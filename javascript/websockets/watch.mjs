@@ -132,15 +132,12 @@ const stamp = () => new Date().toISOString().slice(11, 19);
 // USER_INFO, reachable via --topic, is 9 characters.
 const LABEL_WIDTH = 9;
 
-// `unmatched topic` is the server saying it has never heard of the topic, which
-// on a correct client means the host predates it. Worth naming, because it looks
-// identical to a typo and is the single most likely failure while the
-// dollar-format topics are still rolling out. Printed once, however many topics
-// are missing: on an older host they all fail the same way.
+// `unmatched topic` is the server saying it has never heard of the topic. Worth
+// naming, because it looks identical to a typo. Printed once, however many
+// topics are missing: they all fail the same way.
 const UNMATCHED_TOPIC_HINT = `
   'unmatched topic' means the server does not know that topic.
-  The dollar-format topics this watcher joins need a host running them;
-  older deployments carry only the legacy cents topics. See CHANNELS.md.
+  Check the spelling against CHANNELS.md.
 `;
 let warnedUnmatched = false;
 
@@ -159,8 +156,7 @@ const line = (label, rest) => `${stamp()}  ${label.padEnd(LABEL_WIDTH)} ${rest}`
 // The book. Every price here is a dollar string, as on /api/v1.
 //
 // Levels are flat: `bids` and `offers` hold `price`, `quantity`, `liquidity`,
-// `total_quantity` and `total_liquidity`. The legacy `market:` topic nested
-// them under `ob.b`/`ob.o` with `p`/`q` keys.
+// `total_quantity` and `total_liquidity`.
 //
 // Every push is a COMPLETE snapshot of that market's book, not a delta. Replace
 // whatever you hold for this market_id rather than merging into it.
@@ -285,16 +281,12 @@ function renderEvent(label, event, payload) {
   );
 }
 
-// The dollar topics keep the legacy event names, so a client that already
-// handles active_orders needs no re-tagging when it moves to orders:.
-//
 // The server sends `updated_positions`, not `new_positions`. channel.on()
 // matches exactly, so the wrong name means the event is dropped in silence.
 // Both are bound: an unused name costs nothing.
 //
-// balances: is the one topic whose events differ from its legacy twin - it
-// joins with `balances`, not portfolio:'s `summary`, and carries no gaming
-// fields. `update` and `payment_update` then arrive as they always did.
+// balances: joins with `balances`, then `update` and `payment_update` arrive as
+// they happen.
 const PRIVATE_CHANNELS = [
   ["ORDER", `orders:${userId}`, ["new_open_order", "all_orders"]],
   ["FILL", `fills:${userId}`, ["trade", "all_trades"]],

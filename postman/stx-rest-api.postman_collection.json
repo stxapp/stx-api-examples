@@ -74,7 +74,7 @@
                 "me"
               ]
             },
-            "description": "Returns {\"me\": {...}} - user_id, account_id, key_id, scope. This is the only place your user_id is published, and private WebSocket topics (active_orders:<user_id>) need it.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+            "description": "Returns {\"me\": {...}} - user_id, account_id, key_id, scope. This is the only place your user_id is published, and private WebSocket topics (orders:<user_id>) need it.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
           },
           "response": []
         }
@@ -432,7 +432,7 @@
       "name": "Positions and history",
       "item": [
         {
-          "name": "List trades",
+          "name": "List fills",
           "request": {
             "method": "GET",
             "header": [
@@ -454,14 +454,14 @@
               }
             ],
             "url": {
-              "raw": "{{base_url}}/api/v1/trades?limit=50",
+              "raw": "{{base_url}}/api/v1/fills?limit=50",
               "host": [
                 "{{base_url}}"
               ],
               "path": [
                 "api",
                 "v1",
-                "trades"
+                "fills"
               ],
               "query": [
                 {
@@ -470,7 +470,7 @@
                 }
               ]
             },
-            "description": "Returns {cursor, trades: [...]} - your fills.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+            "description": "Returns {cursor, fills: [...]} - your executions, keyed `trade_id`.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
           },
           "response": []
         },

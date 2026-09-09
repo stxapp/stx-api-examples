@@ -312,19 +312,19 @@ you can compare them on your own network path. They place real orders, so
 
 ## Channel examples
 
-The socket carries nine channels: an order book per market, a market-discovery
-channel, and six scoped to your user id. Sign the handshake and join whatever
-you need on one connection; step 6 above joins six of them at once.
+The socket carries ten channels: three public - `orderbook`, `ticker` and
+`trades` - and seven scoped to your user id. Sign the handshake and join
+whatever you need on one connection; step 6 above joins seven of them at once.
 
 **[CHANNELS.md](./CHANNELS.md)** documents each one: what it is for, the frame
 to join it, a real payload, and the client events you can send. It also covers
 the two keep-alive timers, `cancel_on_disconnect`, and the reconnect procedure.
 
-To look at a single channel rather than all six, `watch_channel.py` joins only
+To look at a single channel rather than all seven, `watch_channel.py` joins only
 what you name and prints frames unformatted:
 
 ```bash
-python python/websockets/watch_channel.py --topic 'portfolio:<user_id>'
+python python/websockets/watch_channel.py --topic 'balances:<user_id>'
 ```
 
 ## Reference
@@ -336,7 +336,7 @@ full API lives at [docs.stxapp.io](https://docs.stxapp.io).
 
 Two transports, and a serious integration uses both.
 
-- **REST** at `/api/v1`: orders, market and event discovery, your own trades,
+- **REST** at `/api/v1`: orders, market and event discovery, your own fills,
   positions and settlements. This is the documented surface.
 - **WebSocket** at `/socket/websocket`: Phoenix channels. Order book depth,
   fills, order state changes, positions, balance. The only way to know about a
@@ -415,8 +415,14 @@ dollars, not currency subunits: send "0.56" for 56 cents and "56.00" for
 
 That is deliberate. `5600` used to mean $56.00 in cents, and reading it as
 $5,600.00 would be a 100x overprice that passes range validation on a $100
-market, so the server refuses to guess. `quantity` is exempt and still accepts a
-number, because a contract count carries no unit ambiguity.
+market, so the server refuses to guess. `quantity` is a string too, for a
+different reason: a float reaches the server as an IEEE-754 double, so a sent
+`2.675` would rest on the book as `2.67499999999999982...`. A number is a 400
+either way:
+
+```
+400 quantity must be a decimal string, not a number: send "1", not 1
+```
 
 Any width from zero to seven decimals is accepted - `"0.51"`, `"0.5100"` and
 `"0.510000"` are the same order - and the response echoes it at four. Compare
@@ -441,27 +447,14 @@ markets settle at $100 and `max_price` is `"100.0000"`. Read it off the market.
 
 A price at or above the cap is a `422 The order's price must be lower than 1.00`.
 
-#### The WebSocket topics come in both formats
+#### The WebSocket topics use the same format
 
-The **dollar-format topics** - `orderbook`, `ticker`, `trades`, `orders:`,
-`fills:`, `positions:`, `settlements:`, `balances:` and `account:` - use exactly
-the format above, so a REST snapshot and a socket delta can be mixed without
-converting anything. Every example here joins those.
+`orderbook`, `ticker`, `trades`, `orders:`, `fills:`, `positions:`,
+`settlements:`, `balances:` and `account:` use exactly the format above, so a
+REST snapshot and a socket delta can be mixed without converting anything.
 
-The older topics predate the format and were not converted. They still work, but
-they send cents, and one `market:` join reply carries the book twice in two
-different units:
-
-| where | example | unit |
-| --- | --- | --- |
-| socket `ob.b[i].p` | `0.61` | decimal dollars, as a number |
-| socket `bids[i].price` | `61` | integer cents |
-| `active_orders` push `price` | `51` | integer cents |
-| `portfolio` `available_balance` | `1000073` | integer cents |
-
-[CHANNELS.md](./CHANNELS.md) documents both families and maps each legacy topic
-onto its replacement. Do not join a topic and its twin on the same socket - you
-receive every update twice, once in each format.
+[CHANNELS.md](./CHANNELS.md) documents each one. Do not join `account:` and a
+per-type topic on the same socket - you receive every update twice.
 
 ### Response shapes
 
@@ -530,8 +523,6 @@ unless you mean it.
 
 - **`?status=OPEN` returns 400.** Status values are lowercase, and `open` is the
   only accepted one; `?status=suspended` is a 400 as well.
-- The `market_updates` channel is documented in some places with the topic
-  `market_update`, singular. It is plural.
 
 ## Where to go next
 
@@ -545,7 +536,7 @@ unless you mean it.
 For a market-making loop specifically: tag every order with your own
 `client_order_id`, use `cancel_on_disconnect` so a dropped connection does not
 leave you quoting, re-quote with a cancel followed by a place since there is no
-atomic replace, and take fills from the `active_trades` channel rather than
+atomic replace, and take fills from the `fills:<user_id>` channel rather than
 polling. There are no enforced rate limits today, but prefer the batch cancel
 endpoints over loops.
 

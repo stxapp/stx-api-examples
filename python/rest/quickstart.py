@@ -225,12 +225,14 @@ def cmd_roundtrip(config, private_key, args):
         "market_id": market["market_id"],
         "order_type": "limit",
         "action": "buy",
-        # A STRING, in dollars. Sending the number 51 is a 400: an integer used
-        # to mean 51 cents, and reading it as $51.00 would be a 100x overprice,
-        # so the server rejects it rather than guessing. quantity is exempt -
-        # a contract count carries no unit ambiguity - and still takes a number.
+        # Both are STRINGS. Sending the number 51 as a price is a 400: an
+        # integer used to mean 51 cents, and reading it as $51.00 would be a
+        # 100x overprice, so the server rejects it rather than guessing.
+        # quantity is a string for a different reason - a float arrives as an
+        # IEEE-754 double, so 2.675 would rest on the book as 2.67499999...
+        # A number is a 400 either way; the decimal string is the only spelling.
         "price": stx.dollar_string(price),
-        "quantity": 1,
+        "quantity": "1",
         # Your own reference, echoed back on the order and on every socket
         # push about it. Use it to tie exchange state to your own.
         "client_order_id": f"quickstart-{int(time.time())}",

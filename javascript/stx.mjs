@@ -288,11 +288,13 @@ export function argList(value) {
 // loyalty points; both stay plain JSON numbers. Convert what is an amount of
 // money or a count of contracts, nothing else.
 //
-// Going the other way, `price` on POST /api/v1/orders must be a string. An
-// integer is rejected with a 400 rather than guessed at, because a legacy
-// client's 5600 meant $56.00 and reading it as $5,600.00 would be a 100x
-// overprice. `quantity` still accepts a number, since a contract count has no
-// unit ambiguity.
+// Going the other way, `price` and `quantity` on POST /api/v1/orders must both
+// be strings. An integer price is rejected with a 400 rather than guessed at,
+// because a legacy client's 5600 meant $56.00 and reading it as $5,600.00 would
+// be a 100x overprice. `quantity` refuses numbers for a different reason: a
+// float arrives as an IEEE-754 double, so a sent 2.675 would rest on the book
+// as 2.67499999999999982... Integers are exact, but accepting them while
+// refusing floats is harder to state than to follow, so every number is a 400.
 //
 // JavaScript has no decimal type, so these strings become float64. That is
 // exact enough for the two-decimal quotes these markets trade at and for the
@@ -328,19 +330,15 @@ export function fmtMoney(value, places = 2) {
  *
  * The input side is looser than the output - "0.51", "0.5100" and "0.510000"
  * are the same order - so you never have to match the server's width.
+ *
+ * Capped at seven, which is the server's own limit, because float64 noise would
+ * otherwise reach the wire: `0.24 - 0.1` is 0.13999999999999999 here, and
+ * sending that verbatim is a `400 price supports at most 7 decimal places`.
+ * Seven decimals is past any real quote, so the cap only ever trims the noise.
+ * python/stx.py needs no equivalent - Decimal arithmetic never produces it.
  */
 export function dollarString(value) {
   const number = Number(value);
   const carried = (String(number).split(".")[1] ?? "").length;
-  return number.toFixed(Math.max(4, carried));
+  return number.toFixed(Math.min(7, Math.max(4, carried)));
 }
-
-// ---------------------------------------------------------------------------
-// The legacy socket topics
-//
-// The pre-SX-12037 WebSocket topics were not converted and still send integer
-// cents, and one `market:` join reply carries the book twice in two units (`ob`
-// in dollars, `bids`/`offers` in cents). None of the examples here join them any
-// more - they use the dollar topics, which agree with /api/v1 field for field.
-// CHANNELS.md documents both and how they map onto each other.
-// ---------------------------------------------------------------------------

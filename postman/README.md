@@ -1,7 +1,7 @@
 # Postman collection
 
 `stx-rest-api.postman_collection.json` covers every `/api/v1` route: identity,
-markets, events, orders, trades, positions and portfolio history. Import it and
+markets, events, orders, fills, positions and portfolio history. Import it and
 set `base_url` and `key_id` in the collection variables.
 
 ## Postman cannot sign for you

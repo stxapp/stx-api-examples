@@ -187,16 +187,12 @@ socket.connect();
 // subscription to everything.
 const channel = socket.channel("orderbook", { market_ids: [market.market_id] });
 
-// `unmatched topic` is the server saying it has never heard of the topic, which
-// on a correct client means the host predates it. Worth naming, because it looks
-// identical to a typo and is the single most likely failure while the
-// dollar-format topics are still rolling out. python/websockets/latency.py says
-// the same thing on the same failure.
+// `unmatched topic` is the server saying it has never heard of the topic. Worth
+// naming, because it looks identical to a typo. python/websockets/latency.py
+// says the same thing on the same failure.
 const UNMATCHED_TOPIC_HINT = `
   'unmatched topic' means the server does not know this topic.
-  The dollar-format topics (orderbook, ticker, trades, orders:, fills:,
-  positions:, settlements:, balances:, account:) need a host running them;
-  older deployments carry only the legacy cents topics. See CHANNELS.md.
+  Check the spelling against CHANNELS.md.
 `;
 
 await new Promise((resolve, reject) => {
@@ -266,7 +262,7 @@ try {
           action: "buy",
           // A string, in dollars. The number 51 is a 400 - see ../stx.mjs.
           price: dollarString(price),
-          quantity: 1,
+          quantity: "1",
           client_order_id: `latency-${Date.now()}`,
         }));
       } else {

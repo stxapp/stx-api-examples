@@ -203,11 +203,13 @@ def signed_headers(private_key, key_id, method, path):
 # loyalty points; both stay plain JSON numbers. Convert what is an amount of
 # money or a count of contracts, nothing else.
 #
-# Going the other way, `price` on POST /api/v1/orders must be a string. An
-# integer is rejected with a 400 rather than guessed at, because a legacy
-# client's 5600 meant $56.00 and reading it as $5,600.00 would be a 100x
-# overprice. `quantity` still accepts a number, since a contract count has no
-# unit ambiguity.
+# Going the other way, `price` and `quantity` on POST /api/v1/orders must both
+# be strings. An integer price is rejected with a 400 rather than guessed at,
+# because a legacy client's 5600 meant $56.00 and reading it as $5,600.00 would
+# be a 100x overprice. `quantity` refuses numbers for a different reason: a
+# float arrives as an IEEE-754 double, so a sent 2.675 would rest on the book as
+# 2.67499999999999982... Integers are exact, but accepting them while refusing
+# floats is harder to state than to follow, so every number is a 400.
 # ---------------------------------------------------------------------------
 
 
@@ -244,13 +246,3 @@ def dollar_string(value):
     scale = max(4, -value.normalize().as_tuple().exponent)
     return f"{value:.{scale}f}"
 
-
-# ---------------------------------------------------------------------------
-# The legacy socket topics
-#
-# The pre-SX-12037 WebSocket topics were not converted and still send integer
-# cents, and one `market:` join reply carries the book twice in two units
-# (`ob` in dollars, `bids`/`offers` in cents). None of the examples here join
-# them any more - they use the dollar topics, which agree with /api/v1 field
-# for field. CHANNELS.md documents both and how they map onto each other.
-# ---------------------------------------------------------------------------

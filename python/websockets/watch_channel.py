@@ -5,7 +5,7 @@
     python python/websockets/watch_channel.py --topic 'orders:<user_id>'
     python python/websockets/watch_channel.py --topic 'account:<user_id>'
 
-watch.py joins six channels at once and formats the events it recognises. This
+watch.py joins seven channels at once and formats the events it recognises. This
 joins only what you name and prints frames as they arrive, unformatted, which is
 what you want when working through CHANNELS.md one channel at a time.
 
@@ -29,9 +29,9 @@ most terminals:
     python python/websockets/watch_channel.py --topic ticker \\
         --payload '{"sports": ["baseball"], "competitions": ["MLB"]}'
 
-`account:<user_id>` is the one topic with no legacy twin: it carries orders,
-fills, positions, settlements and balances on a single join. Do not join it
-alongside the per-type topics - you would receive everything twice.
+`account:<user_id>` carries orders, fills, positions, settlements and balances
+on a single join. Do not join it alongside the per-type topics - you would
+receive everything twice.
 
 Requires the packages in python/requirements.txt; ``./install.sh`` puts them in
 python/.venv.
@@ -127,7 +127,7 @@ async def watch(config, private_key, topics, join_payload, max_chars=DEFAULT_MAX
 
                 # The raw frame above is the point of this script, so the reason
                 # is printed beside it rather than instead of it. Once per run:
-                # on an older host every dollar topic fails the same way.
+                # every unknown topic fails the same way.
                 if not warned["unmatched"] and \
                         (payload.get("response") or {}).get("reason") == "unmatched topic":
                     print(UNMATCHED_TOPIC_HINT, file=sys.stderr)
@@ -137,14 +137,11 @@ async def watch(config, private_key, topics, join_payload, max_chars=DEFAULT_MAX
 
 
 # `unmatched topic` is the server saying it has never heard of the topic, which
-# on a correct client means the host predates it - or that the topic is
-# misspelled, which looks identical. Both are worth naming in a tool whose whole
+# on a correct client means it is misspelled. Worth naming in a tool whose whole
 # job is trying one channel at a time.
 UNMATCHED_TOPIC_HINT = (
     "\n  'unmatched topic' means the server does not know that topic.\n"
-    "  Check the spelling against CHANNELS.md - and note that the dollar-format\n"
-    "  topics need a host running them, while older deployments carry only the\n"
-    "  legacy cents topics.\n"
+    "  Check the spelling against CHANNELS.md.\n"
 )
 
 
@@ -162,7 +159,7 @@ def main():
                              f"{DEFAULT_MAX_CHARS} characters")
     parser.add_argument("--payload", default="{}", metavar="JSON",
                         help="join payload, e.g. --payload "
-                             "'{\"rule_filters\": [\"home_winner\"]}' on the markets "
+                             "'{\"sports\": [\"baseball\"]}' on the ticker "
                              "channel. Default {}")
     args = parser.parse_args()
 

@@ -327,6 +327,26 @@ what you name and prints frames unformatted:
 python python/websockets/watch_channel.py --topic 'balances:<user_id>'
 ```
 
+Payloads are clipped to 400 characters, so a join snapshot of several hundred
+rows does not bury the stream. That is narrower than a single `ticker` frame,
+so pass **`--full`** when you are reading one message rather than watching for
+one. A clipped line tells you it was clipped:
+
+```bash
+python python/websockets/watch_channel.py --topic ticker --full
+```
+
+**`--payload`** sets the join frame's payload, which is how the public topics
+filter - and `orderbook` requires at least one `market_id`:
+
+```bash
+python python/websockets/watch_channel.py --topic orderbook \
+  --payload '{"market_ids": ["<market_id>"]}'
+```
+
+`--topic` is repeatable, and `--help` lists every flag. The Node script takes
+the same arguments.
+
 ## Reference
 
 Everything below is the detail you will want once the walkthrough works. The

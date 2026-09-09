@@ -56,12 +56,35 @@ const stamp = () => new Date().toISOString().slice(11, 19);
 // user id on every line only makes them unreadable.
 const label = (topic) => topic.split(":")[0].padEnd(18);
 
+// parseArgs has no help of its own, and --help must be answered before
+// loadProfile so that it works on a machine with no credentials yet. Mirrors
+// `python python/websockets/watch_channel.py --help`.
+const USAGE = `usage: watch_channel.mjs [-h] [--profile PROFILE] --topic TOPIC [--full]
+                         [--payload JSON]
+
+Join one channel and print every frame it sends.
+
+options:
+  -h, --help         show this help message and exit
+  --profile PROFILE  profile in ~/.stx/credentials
+  --topic TOPIC      topic to join, repeatable. <user_id> is substituted, e.g.
+                     --topic 'orders:<user_id>'
+  --full             print whole payloads instead of clipping them at ${DEFAULT_MAX_CHARS}
+                     characters
+  --payload JSON     join payload, e.g. --payload '{"sports": ["baseball"]}'
+                     on the ticker channel. Default {}`;
+
 const args = parseArgs();
+if (args.help || args._.includes("-h")) {
+  console.log(USAGE);
+  process.exit(0);
+}
+
 const config = loadProfile(args.profile);
 const topics = argList(args.topic);
 const maxChars = args.full ? null : DEFAULT_MAX_CHARS;
 if (topics.length === 0) {
-  fail("--topic is required, e.g. --topic ticker");
+  fail("--topic is required, e.g. --topic ticker. --help lists every flag.");
 }
 
 let joinPayload = {};

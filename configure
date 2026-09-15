@@ -1,0 +1,251 @@
+#!/bin/sh
+# configure - write STX API credentials to ~/.stx/, safely.
+#
+# Creates (or replaces) one profile in ~/.stx/credentials and copies its private
+# key to ~/.stx/<profile>.pem. Every example in this repository reads that file,
+# so this is the only place credentials are entered.
+#
+#     ./configure                 # writes the [default] profile
+#     ./configure us-demo         # writes the [us-demo] profile
+#
+# Nothing here takes key material on the command line: an argument is visible in
+# `ps` output and lands in your shell history. The private key is read from a
+# file you point at, or typed with terminal echo off, and it is never printed
+# back.
+#
+# POSIX sh. No Python, no Node, no network.
+
+set -eu
+
+STX_DIR="${STX_DIR:-$HOME/.stx}"
+CREDENTIALS="$STX_DIR/credentials"
+
+PROFILE="${1:-default}"
+
+case "$PROFILE" in
+    -h|--help|help)
+        sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+        exit 0
+        ;;
+    *[!A-Za-z0-9_-]*)
+        echo "Profile names may contain letters, digits, '-' and '_' only." >&2
+        exit 1
+        ;;
+esac
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+
+# ask PROMPT DEFAULT -> echoes the answer, or DEFAULT when the reply is empty.
+ask() {
+    prompt=$1
+    default=$2
+    if [ -n "$default" ]; then
+        printf '%s [%s]: ' "$prompt" "$default" >&2
+    else
+        printf '%s: ' "$prompt" >&2
+    fi
+    read -r reply || reply=""
+    [ -n "$reply" ] || reply=$default
+    printf '%s\n' "$reply"
+}
+
+# choose PROMPT CHOICE... -> echoes the chosen value.
+choose() {
+    prompt=$1
+    shift
+    i=1
+    for option in "$@"; do
+        printf '  %d) %s\n' "$i" "$option" >&2
+        i=$((i + 1))
+    done
+    while :; do
+        printf '%s [1]: ' "$prompt" >&2
+        read -r reply || reply=""
+        [ -n "$reply" ] || reply=1
+        case "$reply" in
+            *[!0-9]*|'') ;;
+            *)
+                if [ "$reply" -ge 1 ] && [ "$reply" -le $# ]; then
+                    eval "printf '%s\n' \"\${$reply}\""
+                    return 0
+                fi
+                ;;
+        esac
+        echo "  Enter a number between 1 and $#." >&2
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Do not silently clobber an existing profile.
+# ---------------------------------------------------------------------------
+
+if [ -f "$CREDENTIALS" ] && grep -q "^\[$PROFILE\]" "$CREDENTIALS" 2>/dev/null; then
+    echo "Profile [$PROFILE] already exists in $CREDENTIALS."
+    answer=$(ask "Replace it? (y/N)" "n")
+    case "$answer" in
+        y|Y|yes|YES) ;;
+        *) echo "Left unchanged."; exit 0 ;;
+    esac
+fi
+
+echo
+echo "Configuring profile [$PROFILE]."
+echo
+
+# ---------------------------------------------------------------------------
+# Which exchange, and which environment on it.
+#
+# These two values are all that is stored: each language resolves them to a base
+# URL through its own single table, so a hostname is never pasted into a script
+# or a credentials file.
+# ---------------------------------------------------------------------------
+
+echo "Which exchange?"
+EXCHANGE=$(choose "  exchange" "us" "ca")
+echo
+
+echo "Which environment?"
+if [ "$EXCHANGE" = "us" ]; then
+    # US production is not published for API-key clients yet.
+    ENVIRONMENT=$(choose "  environment" "integration")
+else
+    ENVIRONMENT=$(choose "  environment" "integration" "production")
+fi
+echo
+
+if [ "$ENVIRONMENT" = "production" ]; then
+    echo "! [$PROFILE] will point at a real-money exchange."
+    echo "  Orders placed with it are real. Build against integration first."
+    echo
+fi
+
+# ---------------------------------------------------------------------------
+# Key id. Not a secret - it travels in the X-STX-ACCESS-KEY header - so it is
+# read normally.
+# ---------------------------------------------------------------------------
+
+KEY_ID=$(ask "API key id" "")
+if [ -z "$KEY_ID" ]; then
+    echo "A key id is required. Create one under Account -> API Keys." >&2
+    exit 1
+fi
+echo
+
+# ---------------------------------------------------------------------------
+# Private key. Either copied from a PEM file you already have, or pasted.
+# ---------------------------------------------------------------------------
+
+KEY_PATH="$STX_DIR/$PROFILE.pem"
+
+umask 077
+mkdir -p "$STX_DIR"
+chmod 700 "$STX_DIR"
+
+echo "How should the private key be supplied?"
+KEY_SOURCE=$(choose "  source" "path to a .pem file" "paste it")
+echo
+
+TMP_KEY="$STX_DIR/.$PROFILE.pem.tmp"
+trap 'rm -f "$TMP_KEY"' EXIT INT HUP TERM
+
+if [ "$KEY_SOURCE" = "path to a .pem file" ]; then
+    SOURCE_PATH=$(ask "Path to the PEM" "")
+    # Expand a leading ~ ourselves: read does not do it.
+    case "$SOURCE_PATH" in
+        "~/"*) SOURCE_PATH="$HOME/${SOURCE_PATH#\~/}" ;;
+    esac
+    if [ ! -r "$SOURCE_PATH" ]; then
+        echo "Cannot read $SOURCE_PATH" >&2
+        exit 1
+    fi
+    cat "$SOURCE_PATH" > "$TMP_KEY"
+else
+    echo "Paste the PEM, including the BEGIN and END lines."
+    echo "Terminal echo is off, so you will not see it. Reading until END PRIVATE KEY."
+    echo
+    if [ -t 0 ]; then
+        stty -echo 2>/dev/null || true
+    fi
+    : > "$TMP_KEY"
+    while IFS= read -r line; do
+        printf '%s\n' "$line" >> "$TMP_KEY"
+        case "$line" in
+            *"END PRIVATE KEY"*) break ;;
+        esac
+    done
+    if [ -t 0 ]; then
+        stty echo 2>/dev/null || true
+    fi
+    echo "Read $(wc -l < "$TMP_KEY" | tr -d ' ') lines."
+    echo
+fi
+
+if ! grep -q "BEGIN PRIVATE KEY" "$TMP_KEY" || ! grep -q "END PRIVATE KEY" "$TMP_KEY"; then
+    echo "That does not look like a PKCS#8 PEM private key." >&2
+    echo "It should start with '-----BEGIN PRIVATE KEY-----'." >&2
+    exit 1
+fi
+
+# Confirm it parses as Ed25519 while we still have somewhere useful to say so.
+if command -v openssl >/dev/null 2>&1; then
+    if openssl pkey -in "$TMP_KEY" -noout 2>/dev/null; then
+        if ! openssl pkey -in "$TMP_KEY" -noout -text 2>/dev/null | grep -qi "ED25519"; then
+            echo "! This key parses but is not Ed25519. STX API keys are Ed25519;"
+            echo "  signatures made with it will be rejected."
+        fi
+    else
+        echo "! openssl could not parse this key. Saving it anyway, but ./verify will fail."
+    fi
+fi
+
+mv "$TMP_KEY" "$KEY_PATH"
+chmod 600 "$KEY_PATH"
+trap - EXIT INT HUP TERM
+
+# ---------------------------------------------------------------------------
+# Write the profile. Rewrites the file with this section replaced, so re-running
+# for one profile leaves the others alone.
+# ---------------------------------------------------------------------------
+
+TMP_CREDENTIALS="$CREDENTIALS.tmp.$$"
+: > "$TMP_CREDENTIALS"
+chmod 600 "$TMP_CREDENTIALS"
+
+if [ -f "$CREDENTIALS" ]; then
+    awk -v section="[$PROFILE]" '
+        /^\[/ { skipping = ($0 == section) }
+        !skipping { print }
+    ' "$CREDENTIALS" >> "$TMP_CREDENTIALS"
+fi
+
+# Trim trailing blank lines, then append the new section.
+awk 'BEGIN { blanks = 0 }
+     /^[[:space:]]*$/ { blanks++; next }
+     { while (blanks-- > 0) print ""; blanks = 0; print }
+' "$TMP_CREDENTIALS" > "$TMP_CREDENTIALS.trimmed"
+mv "$TMP_CREDENTIALS.trimmed" "$TMP_CREDENTIALS"
+
+{
+    if [ -s "$TMP_CREDENTIALS" ]; then echo ""; fi
+    echo "[$PROFILE]"
+    echo "exchange = $EXCHANGE"
+    echo "environment = $ENVIRONMENT"
+    echo "key_id = $KEY_ID"
+    echo "private_key = $KEY_PATH"
+} >> "$TMP_CREDENTIALS"
+
+mv "$TMP_CREDENTIALS" "$CREDENTIALS"
+chmod 600 "$CREDENTIALS"
+
+echo "Wrote:"
+echo "  $CREDENTIALS   [$PROFILE] -> $EXCHANGE/$ENVIRONMENT"
+echo "  $KEY_PATH"
+echo
+echo "Next:"
+if [ "$PROFILE" = "default" ]; then
+    echo "  ./verify        # signs GET /api/v1/me and prints who you are"
+else
+    echo "  ./verify $PROFILE"
+fi

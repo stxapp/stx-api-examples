@@ -1,3 +1,8 @@
-cryptography>=41.0
-requests>=2.28
-websockets>=12.0
+# Pinned, so a run today and a run in six months measure the same thing.
+#
+# cryptography is not optional: Python has no Ed25519 in the standard library,
+# so there is no way to sign a request without it. requests and websockets are
+# convenience - the signing itself is stdlib base64 and time.
+cryptography==46.0.3
+requests==2.32.5
+websockets==15.0.1

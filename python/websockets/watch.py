@@ -42,7 +42,7 @@ import asyncio
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     import requests
@@ -97,7 +97,8 @@ def line(label, rest):
 
 
 def stamp():
-    return datetime.now().strftime("%H:%M:%S")
+    """UTC, HH:MM:SS. All four watchers use the same clock."""
+    return datetime.now(timezone.utc).strftime("%H:%M:%S")
 
 
 # ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@
 #
 #   vhs docs/watch-roundtrip.tape
 #
-# This places a REAL order on the integration exchange, so it needs a working
+# This places a REAL order on the demo exchange, so it needs a working
 # [default] profile. It never touches production.
 #
 # The market is resolved at record time rather than pinned, so the tape keeps

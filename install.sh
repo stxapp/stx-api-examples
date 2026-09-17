@@ -107,13 +107,24 @@ echo
 # The shell examples, which are the fallback when neither runtime is present.
 # ---------------------------------------------------------------------------
 
-for tool in curl openssl; do
-    if command -v "$tool" >/dev/null 2>&1; then
-        note_installed "$tool  - already present, nothing to install"
-    else
-        note_skipped "$tool  - not found; ./configure and ./verify need it"
-    fi
-done
+if command -v curl >/dev/null 2>&1; then
+    note_installed "curl  - already present, nothing to install"
+else
+    note_skipped "curl  - not found; ./configure and ./verify need it"
+fi
+
+# macOS ships LibreSSL as `openssl`, and LibreSSL cannot generate or sign with
+# Ed25519 keys. ./verify fails with no signature until OpenSSL 3 is first on PATH.
+if ! command -v openssl >/dev/null 2>&1; then
+    note_skipped "openssl  - not found; ./configure and ./verify need it"
+elif openssl version 2>/dev/null | grep -q LibreSSL; then
+    note_skipped "openssl  - $(openssl version) cannot do Ed25519. Install OpenSSL 3:"
+    note_skipped "             brew install openssl@3"
+    note_skipped "             export PATH=\"\$(brew --prefix openssl@3)/bin:\$PATH\""
+    note_skipped "           and add that export to your shell profile (~/.zshrc)."
+else
+    note_installed "openssl  - already present, nothing to install"
+fi
 
 echo "Set up:"
 if [ -n "$installed" ]; then

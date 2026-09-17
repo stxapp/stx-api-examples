@@ -1,7 +1,8 @@
 # Postman collection
 
 `stx-rest-api.postman_collection.json` covers every `/api/v1` route: identity,
-markets, events, orders, fills, positions and portfolio history.
+markets, events, orders, fills, positions and portfolio history (settlements,
+deposits, withdrawals, fees and adjustments).
 
 ## Setup
 
@@ -18,6 +19,10 @@ Then send any request. The collection signs for you.
 travel inside the exported JSON, so a key there can end up in a repository or a
 shared workspace. The collection deliberately does not declare
 `stx_private_key` for that reason.
+
+The portfolio lists take `limit` and a disabled `cursor` parameter. To fetch the
+next page, enable `cursor` and paste the `cursor` value from the previous
+response; it is `null` on the last page.
 
 Two requests need an id you copy from an earlier response: `Get an order` and
 `Cancel an order` read `order_id`, and `Place an order` reads `market_id` from
@@ -58,7 +63,9 @@ order of likelihood:
 
 1. `stx_private_key` is not set in the active environment, or the wrong
    environment is selected.
-2. `key_id` does not match that private key.
+2. `key_id` does not match that private key, or the key belongs to another
+   environment. A key works in one environment only: a demo key does not work
+   in production, so create a production key at https://stxapp.ca.
 3. Your clock is more than 30 seconds off. Check NTP.
 4. The key lacks the scope for the route - placing or cancelling needs
    `read_write`.

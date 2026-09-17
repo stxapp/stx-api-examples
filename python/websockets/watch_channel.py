@@ -72,7 +72,8 @@ DEFAULT_MAX_CHARS = 400
 
 
 def stamp():
-    return time.strftime("%H:%M:%S")
+    """UTC, HH:MM:SS. All four watchers use the same clock."""
+    return time.strftime("%H:%M:%S", time.gmtime())
 
 
 def label(topic):

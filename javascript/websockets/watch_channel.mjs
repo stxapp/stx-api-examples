@@ -50,6 +50,7 @@ const HEARTBEAT_MS = 20_000;
 // most terminals.
 const DEFAULT_MAX_CHARS = 400;
 
+// UTC, HH:MM:SS. All four watchers use the same clock.
 const stamp = () => new Date().toISOString().slice(11, 19);
 
 // The topic's prefix, padded. The full topic is on the join frame; repeating a

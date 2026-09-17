@@ -5,8 +5,8 @@ would rather read a reference than a walkthrough, [README.md](./README.md)
 covers the same ground more densely, and the full API lives at
 [docs.stxapp.io](https://docs.stxapp.io).
 
-Every command below has been run end to end against the US integration
-exchange, `demo.stxapp.io`.
+Every command below has been run end to end against the US demo exchange,
+`demo.stxapp.io`.
 
 ## 1. Clone and install
 
@@ -45,8 +45,9 @@ The JavaScript REST examples need nothing installed at all; Node has Ed25519 in
 Every `/api/v1` route requires a signature, so you need a key before you can
 read even market data.
 
-1. Register on the environment you will build against. For the US integration
-   exchange that is [demo.stxapp.io](https://demo.stxapp.io).
+1. Register on the environment you will build against. For the US demo exchange
+   that is [demo.stxapp.io](https://demo.stxapp.io); for the Ontario demo
+   exchange, [demo.stxapp.ca](https://demo.stxapp.ca).
 2. **Account -> API Keys -> Create API Key.** Choose `read_only`, or
    `read_write` if you want to place orders in step 5.
 3. Copy the **key id** and the **private key PEM**. The matching public key is
@@ -54,7 +55,21 @@ read even market data.
    and is never stored by the exchange, so save it before closing the dialog.
 
 You can also generate the pair yourself and hand over only the public half, so
-the private key never leaves your machine. Keys are Ed25519:
+the private key never leaves your machine. Keys are Ed25519.
+
+**On macOS, install OpenSSL 3 first.** The `openssl` macOS ships is LibreSSL,
+which cannot generate or sign with Ed25519 keys; `openssl version` says
+`LibreSSL` if that is what you have. Install OpenSSL 3 with Homebrew and put it
+first on `PATH`:
+
+```sh
+brew install openssl@3
+export PATH="$(brew --prefix openssl@3)/bin:$PATH"   # add to ~/.zshrc to keep it
+openssl version                                      # should print OpenSSL 3.x
+```
+
+`./verify` signs with `openssl` too, so it needs this even if the exchange
+generated your key. `./install.sh` warns when it finds LibreSSL.
 
 ```sh
 # Generates the PRIVATE key and writes it to the file. Keep it; this is what
@@ -86,23 +101,38 @@ The file it produces is an INI with one section per profile:
 
 ```ini
 [default]
-exchange    = us
-environment = integration
-key_id      = <your key id>
-private_key = /Users/you/.stx/default.pem
+region   = us                          # us | ontario
+env      = demo                        # demo | prod
+key_id   = <your key id>
+key_file = /Users/you/.stx/default.pem
 ```
 
-Hostnames are deliberately absent. `exchange` and `environment` resolve through
-one table per language:
+Hostnames are deliberately absent. `region` and `env` resolve through one table
+per language:
 
-| exchange | environment | host |
+| region | env | host |
 | --- | --- | --- |
-| `us` | `integration` | `demo.stxapp.io` |
-| `ca` | `integration` | `api-staging.on.sportsxapp.com` |
-| `ca` | `production` | `api.on.stxapp.ca` (real money) |
+| `us` | `demo` | `demo.stxapp.io` |
+| `ontario` | `demo` | `demo.stxapp.ca` |
+| `ontario` | `prod` | `stxapp.ca` (real money) |
 
-`./configure ca-integration` writes a second profile alongside the first; every
-script takes `--profile <name>` to pick one.
+US production is not open to API keys yet. A region or env not in the table is
+an error rather than a silent fallback; for any other host, see
+[Pointing at another host](#pointing-at-another-host).
+
+`./configure ontario-demo` writes a second profile alongside the first. `./verify`
+and `./configure` take the profile name as a positional argument, as in
+`./verify ontario-demo`; the Python and JavaScript scripts take
+`--profile ontario-demo`.
+
+Files written by earlier versions of `./configure`, with `exchange`,
+`environment` and `private_key`, still work: `ca` reads as `ontario`,
+`integration` as `demo` and `production` as `prod`.
+
+**Moving to production needs a new key.** A key belongs to one environment, so a
+demo key does not work in production. Create a production key at
+[stxapp.ca](https://stxapp.ca), then write a profile for it with
+`./configure ontario-prod`.
 
 Now confirm the whole chain works:
 
@@ -111,7 +141,7 @@ Now confirm the whole chain works:
 ```
 
 ```
-profile     [default] -> us/integration
+profile     [default] -> us/demo
 host        https://demo.stxapp.io
 signing     GET /api/v1/me
 
@@ -124,8 +154,19 @@ OK
 anything, and it is a complete signing example in about thirty lines of shell.
 If it prints a `user_id`, everything else in this repository will work.
 
-If you get `unauthorized` instead, it is almost always clock skew: the
-timestamp must be within 30 seconds of the server clock.
+If you get a 401 instead, the body is
+`{"error":"Missing or invalid API key credentials"}` whatever the cause, so check
+each of these:
+
+- **The key id is wrong**, or does not belong to the private key in the profile.
+- **The key is from another environment.** A demo key in production is a 401;
+  create a production key at [stxapp.ca](https://stxapp.ca).
+- **The clock is more than 30 seconds off** the server's. Keep the machine on NTP.
+- **The signed path is not the path sent**, most often a missing query string.
+  See [Signing](#signing).
+
+If `./verify` says `openssl produced no signature`, the `openssl` on `PATH` is
+LibreSSL; see the macOS note in [step 2](#2-create-an-api-key).
 
 Note the `user_id` it prints. Private WebSocket topics are scoped by it, as in
 `orders:<user_id>`, and `GET /api/v1/me` is the only place it is
@@ -173,7 +214,9 @@ cancelled  status=cancelled
 
 That is the full loop: signed request, order accepted, order cancelled. It
 refuses to run against a production profile unless you pass
-`--force-production`.
+`--force-production`. When you do move to production, remember that your demo
+key will not work there: create a production key at
+[stxapp.ca](https://stxapp.ca) and a new profile for it.
 
 ## 6. Watch it live
 
@@ -200,23 +243,24 @@ settled by the time you read this and the prices are whatever was on the book
 that afternoon. It is here to show the shape of the two-terminal loop, not
 today's data. Re-record it any time with `vhs docs/watch-roundtrip.tape`.*
 
-The same run, written out. Terminal 1 on join, seven channels: the two public
-market feeds, plus five private ones scoped to your user id.
+The same run, written out, with times in UTC as the watchers print them.
+Terminal 1 on join, seven channels: the two public market feeds, plus five
+private ones scoped to your user id.
 
 ```
 [default -> https://demo.stxapp.io]
 watching STXNCAAF-26SEP031900WESKENN-TOTAL46.5  (7 channels)   ctrl-c to stop
 
-14:51:10  JOIN      BOOK ok, markets=1
-14:51:10  JOIN      MARKET ok, sports=['Football'] competitions=['NCAAF']
-14:51:10  JOIN      ORDER ok, no market filter
-14:51:10  JOIN      FILL ok, no market filter
-14:51:10  JOIN      POS ok, no market filter
-14:51:10  JOIN      SETTLE ok, no market filter
-14:51:10  ORDER     all_orders: 0 row(s)
-14:51:10  FILL      all_trades: 0 row(s)
-14:51:10  POS       all_positions: 2 row(s)
-14:51:10  WALLET    balances  available_balance=9991.8000
+20:51:10  JOIN      BOOK ok, markets=1
+20:51:10  JOIN      MARKET ok, sports=['Football'] competitions=['NCAAF']
+20:51:10  JOIN      ORDER ok, no market filter
+20:51:10  JOIN      FILL ok, no market filter
+20:51:10  JOIN      POS ok, no market filter
+20:51:10  JOIN      SETTLE ok, no market filter
+20:51:10  ORDER     all_orders: 0 row(s)
+20:51:10  FILL      all_trades: 0 row(s)
+20:51:10  POS       all_positions: 2 row(s)
+20:51:10  WALLET    balances  available_balance=9991.8000
 ```
 
 Neither public topic sends anything on join, so no `BOOK` or `MARKET` row
@@ -253,10 +297,10 @@ And terminal 1 shows the whole round trip as it happens, order events and book
 depth interleaved on the one connection:
 
 ```
-14:51:19  ORDER     new_open_order  id=c8720efd-...  status=open  action=buy  filled=0.00  quantity=1.00  price=0.4800  client_order_id=quickstart-1788468679
-14:51:20  BOOK       517.00 @  $0.58   |   $0.63  @ 810.00    (6x5 levels)
-14:51:20  ORDER     new_open_order  id=c8720efd-...  status=cancelled  action=buy  filled=0.00  quantity=1.00  price=0.4800  cancellation_reason=by_player
-14:51:20  BOOK       517.00 @  $0.58   |   $0.63  @ 810.00    (5x5 levels)
+20:51:19  ORDER     new_open_order  id=c8720efd-...  status=open  action=buy  filled=0.00  quantity=1.00  price=0.4800  client_order_id=quickstart-1788468679
+20:51:20  BOOK       517.00 @  $0.58   |   $0.63  @ 810.00    (6x5 levels)
+20:51:20  ORDER     new_open_order  id=c8720efd-...  status=cancelled  action=buy  filled=0.00  quantity=1.00  price=0.4800  cancellation_reason=by_player
+20:51:20  BOOK       517.00 @  $0.58   |   $0.63  @ 810.00    (5x5 levels)
 ```
 
 Trimmed a little for width: each `ORDER` row also carries `market_id` and
@@ -312,7 +356,7 @@ you can compare them on your own network path. They place real orders, so
 
 ## Channel examples
 
-The socket carries ten channels: three public - `orderbook`, `ticker` and
+These examples use ten channels: three public - `orderbook`, `ticker` and
 `trades` - and seven scoped to your user id. Sign the handshake and join
 whatever you need on one connection; step 6 above joins seven of them at once.
 
@@ -416,7 +460,7 @@ JSON number.
 
 The decimal count is a **minimum, not a fixed width**. Money carries at least
 four places and quantities at least two, but a value keeps any further precision
-it genuinely has: an order `price` can carry seven. Parse with a variable-scale
+it genuinely has: a computed field such as `unrounded_trade_fee` can carry more. Parse with a variable-scale
 decimal type - Python's `Decimal` - and never with a fixed-width reader.
 
 Not everything numeric is money. `price_change24h` is a percentage and loyalty
@@ -444,13 +488,22 @@ either way:
 400 quantity must be a decimal string, not a number: send "1", not 1
 ```
 
-Any width from zero to seven decimals is accepted - `"0.51"`, `"0.5100"` and
-`"0.510000"` are the same order - and the response echoes it at four. Compare
-prices as decimals, never as strings.
+A price takes **at most two decimal places**, not counting trailing zeros: it is
+a whole number of cents. `"0.49"` and `"0.4900"` are the same order, and the
+response echoes it at four. `"0.495"` is a 400, and the error quotes the value
+you sent; for `"0.555"` it reads:
+
+```
+400 price must be a whole number of cents — at most 2 decimal places, not
+counting trailing zeros (got "0.555")
+```
+
+Compare prices as decimals, never as strings.
 
 `python/stx.py` and `javascript/stx.mjs` each expose the two helpers the
 examples use: `to_decimal`/`toNumber` to read a field, and
-`dollar_string`/`dollarString` to write one.
+`dollar_string`/`dollarString` to write one. The writers refuse a price that is
+not a whole number of cents rather than rounding it into a different order.
 
 JavaScript has no decimal type, so the examples parse to `Number`. That is exact
 enough for the two-decimal quotes these markets trade at, but it is not a money
@@ -461,9 +514,9 @@ is the string `"0.610.1"` and nothing warns you.
 
 #### The ceiling
 
-A market's price ceiling is its own **`max_price`**, not a fixed 99c. US markets
-settle at $1, so `max_price` is `"1.0000"` and quotes run $0.01-$0.99. Canadian
-markets settle at $100 and `max_price` is `"100.0000"`. Read it off the market.
+A market's price ceiling is its own **`max_price`**, not a fixed 99c. Markets
+settle at $1, so `max_price` is `"1.0000"` and quotes run $0.01-$0.99. Read it
+off the market.
 
 A price at or above the cap is a `422 The order's price must be lower than 1.00`.
 
@@ -492,27 +545,28 @@ Environment variables override `~/.stx/credentials`. Two of them are enough to
 run the Python and JavaScript examples with no credentials file at all:
 
 ```sh
-STX_KEY_ID=<your key id> STX_PRIVATE_KEY=~/.stx/default.pem \
+STX_KEY_ID=<your key id> STX_KEY_FILE=~/.stx/default.pem \
   python python/rest/quickstart.py me
 ```
 
-`STX_PRIVATE_KEY` is the path to the PEM, not its contents. The other three are
-optional and only override what the host table resolves: `STX_PROFILE`,
-`STX_EXCHANGE` and `STX_ENVIRONMENT`, defaulting to `default`, `us` and
-`integration`.
+`STX_KEY_FILE` is the path to the PEM, not its contents. With no profile and no
+region or env set, the examples use `us`/`demo`. The others are optional:
+`STX_PROFILE` picks a profile (default `default`), `STX_REGION` and `STX_ENV`
+override its `region` and `env`, and `STX_BASE_URL` its `base_url`. The older
+names `STX_EXCHANGE`, `STX_ENVIRONMENT` and `STX_PRIVATE_KEY` are still read.
 
 `./configure` and `./verify` read only `STX_DIR` and take everything else from
 the file, so `./verify` ignores a `STX_KEY_ID` you set for the examples.
 
 ### Pointing at another host
 
-`STX_EXCHANGE` and `STX_ENVIRONMENT` only choose from the three hosts in the
-table. For anything else - a server on your own machine, a review app -
-set `STX_BASE_URL`, which wins over the pair:
+`region` and `env` only choose from the three hosts in the table. For anything
+else - a server on your own machine, a review app - set `STX_BASE_URL`, which
+wins over the table. `env` is required alongside it:
 
 ```sh
-STX_BASE_URL=http://localhost:8000 python python/rest/quickstart.py markets
-STX_BASE_URL=http://localhost:8000 node javascript/rest/quickstart.mjs markets
+STX_BASE_URL=http://localhost:8000 STX_ENV=local python python/rest/quickstart.py markets
+STX_BASE_URL=http://localhost:8000 STX_ENV=local node javascript/rest/quickstart.mjs markets
 ```
 
 `http` is handled as well as `https`, and the WebSocket URL follows: the socket
@@ -525,19 +579,20 @@ read that key too, which is the way to make an override stick:
 
 ```ini
 [local]
+env      = local
 base_url = http://localhost:8000
-key_id = <a key registered on that server>
-private_key = ~/.stx/local.pem
+key_id   = <a key registered on that server>
+key_file = ~/.stx/local.pem
 ```
 
 Your key has to exist on whatever host you point at - keys belong to one
 environment, so a `demo.stxapp.io` key is not valid against a local server.
 
-**`exchange` and `environment` still apply.** They decide more than the host:
-`roundtrip` and the latency examples refuse to place orders when `environment`
-is `production`. If you point `base_url` at a real exchange, that guard is all
-that stands between an example and a live book, so leave `environment` alone
-unless you mean it.
+**`env` is required with a `base_url`.** A profile with `base_url` and no `env`
+is an error, because `env` decides more than the host: `roundtrip` and the
+latency examples refuse to place orders when `env` is `prod`. If you point
+`base_url` at a real exchange, that guard is all that stands between an example
+and a live book, so set `env = prod` for it.
 
 ### Known issues
 

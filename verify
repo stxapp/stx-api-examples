@@ -20,9 +20,9 @@ CREDENTIALS="$STX_DIR/credentials"
 PROFILE="${1:-default}"
 
 # ---------------------------------------------------------------------------
-# Base URLs. The one table for shell - configure stores `exchange` and
-# `environment`, and this resolves the pair. Nothing else in this repository
-# writes a hostname.
+# Base URLs. The one table for shell - a profile stores `region` and `env`, and
+# this resolves the pair. Nothing else in this repository writes a hostname.
+# Only public environments are listed; US production is not open yet.
 #
 # A host not in the table - a local server, a review app - goes in the profile
 # as a `base_url` line, which wins over the pair. The Python and JavaScript
@@ -32,12 +32,13 @@ PROFILE="${1:-default}"
 
 base_url() {
     case "$1/$2" in
-        us/integration) echo "https://demo.stxapp.io" ;;
-        ca/integration) echo "https://api-staging.on.sportsxapp.com" ;;
-        ca/production)  echo "https://api.on.stxapp.ca" ;;
+        us/demo)      echo "https://demo.stxapp.io" ;;
+        ontario/demo) echo "https://demo.stxapp.ca" ;;
+        ontario/prod) echo "https://stxapp.ca" ;;
         *)
-            echo "No base URL for exchange '$1' environment '$2'." >&2
-            echo "Known: us/integration, ca/integration, ca/production." >&2
+            echo "No host for region '$1' env '$2' in profile [$PROFILE]." >&2
+            echo "Known: us/demo, ontario/demo, ontario/prod." >&2
+            echo "For any other host add a base_url line to the profile." >&2
             return 1
             ;;
     esac
@@ -70,14 +71,29 @@ if [ ! -f "$CREDENTIALS" ]; then
     exit 1
 fi
 
-EXCHANGE=$(profile_value "$CREDENTIALS" exchange)
-ENVIRONMENT=$(profile_value "$CREDENTIALS" environment)
+REGION=$(profile_value "$CREDENTIALS" region)
+ENV=$(profile_value "$CREDENTIALS" env)
 BASE_URL_OVERRIDE=$(profile_value "$CREDENTIALS" base_url)
 KEY_ID=$(profile_value "$CREDENTIALS" key_id)
-KEY_PATH=$(profile_value "$CREDENTIALS" private_key)
+KEY_PATH=$(profile_value "$CREDENTIALS" key_file)
+
+# Earlier versions of ./configure wrote exchange, environment and private_key.
+# Read them, translated, so an existing credentials file keeps working.
+if [ -z "$REGION" ]; then
+    REGION=$(profile_value "$CREDENTIALS" exchange)
+    [ "$REGION" = "ca" ] && REGION=ontario
+fi
+if [ -z "$ENV" ]; then
+    ENV=$(profile_value "$CREDENTIALS" environment)
+    case "$ENV" in
+        integration) ENV=demo ;;
+        production)  ENV=prod ;;
+    esac
+fi
+[ -n "$KEY_PATH" ] || KEY_PATH=$(profile_value "$CREDENTIALS" private_key)
 
 if [ -z "$KEY_ID" ] || [ -z "$KEY_PATH" ]; then
-    echo "Profile [$PROFILE] is missing key_id or private_key in $CREDENTIALS." >&2
+    echo "Profile [$PROFILE] is missing key_id or key_file in $CREDENTIALS." >&2
     echo "Run ./configure $PROFILE" >&2
     exit 1
 fi
@@ -95,7 +111,11 @@ if [ -n "$BASE_URL_OVERRIDE" ]; then
     # Strip any trailing slash: //api/v1 404s on some routers.
     BASE_URL=$(printf '%s' "$BASE_URL_OVERRIDE" | sed 's:/*$::')
 else
-    BASE_URL=$(base_url "${EXCHANGE:-us}" "${ENVIRONMENT:-integration}")
+    if [ -z "$REGION" ] && [ -z "$ENV" ] && ! grep -q "^\[$PROFILE\]" "$CREDENTIALS"; then
+        REGION=us
+        ENV=demo
+    fi
+    BASE_URL=$(base_url "$REGION" "$ENV")
 fi
 
 for tool in curl openssl; do
@@ -149,11 +169,13 @@ if [ -z "$SIGNATURE" ]; then
     echo "openssl produced no signature." >&2
     echo "Most likely this openssl is LibreSSL, which cannot sign with Ed25519:" >&2
     openssl version >&2
-    echo "Install OpenSSL 3.x and put it first on PATH." >&2
+    echo "macOS ships LibreSSL as openssl. Install OpenSSL 3 and put it first on PATH:" >&2
+    echo "  brew install openssl@3" >&2
+    echo "  export PATH=\"\$(brew --prefix openssl@3)/bin:\$PATH\"" >&2
     exit 1
 fi
 
-echo "profile     [$PROFILE] -> $EXCHANGE/$ENVIRONMENT"
+echo "profile     [$PROFILE] -> ${REGION:-?}/${ENV:-?}"
 echo "host        $BASE_URL"
 echo "signing     $METHOD $REQUEST_PATH"
 echo
@@ -185,8 +207,11 @@ if [ "$STATUS" != "200" ]; then
             echo "  - is the key id in [$PROFILE] the one shown when you created the key?"
             echo "  - is this key registered on $BASE_URL? A key belongs to one environment."
             echo "  - is the clock right? The tolerance is 30 seconds. Now: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+            if [ "$ENV" = "prod" ]; then
+                echo "  - demo keys are not valid in production. Create a production key at https://stxapp.ca."
+            fi
             ;;
-        404) echo "404 suggests the host is wrong for this exchange/environment pair." ;;
+        404) echo "404 suggests the host is wrong for this region/env pair." ;;
     esac
     exit 1
 fi

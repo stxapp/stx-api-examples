@@ -290,11 +290,11 @@ def main():
 
     # This places real orders. Against production that is real money on a real
     # book, which nobody means to do from a measurement script by accident.
-    if config["environment"] == "production" and not args.force_production:
+    if config["env"] == "prod" and not args.force_production:
         sys.exit(
             f"Refusing to place orders against production.\n"
             f"Profile [{config['profile']}] points at {config['base_url']}.\n"
-            f"Run this against an integration profile, or pass --force-production if\n"
+            f"Run this against a demo profile, or pass --force-production if\n"
             f"you really mean to put real orders on a real book."
         )
 

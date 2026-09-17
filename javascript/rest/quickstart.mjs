@@ -7,7 +7,7 @@
 //
 // Add --profile <name> to use a profile other than [default]:
 //
-//   node javascript/rest/quickstart.mjs --profile ca-integration markets
+//   node javascript/rest/quickstart.mjs --profile ontario-demo markets
 //
 // ZERO DEPENDENCIES. Node has Ed25519 in node:crypto and fetch built in, so
 // there is nothing to npm install for this file - `./install.sh` is only needed
@@ -50,7 +50,7 @@ async function request(config, method, path, body) {
     fail(
       `401 unauthorized.\n` +
         `  The signature, key id or timestamp was rejected. The most common causes:\n` +
-        `  - the key belongs to a different environment than ${config.exchange}/${config.environment}\n` +
+        `  - the key belongs to a different environment than ${config.region}/${config.env}\n` +
         `  - the machine clock is more than 30 seconds off\n` +
         `  Body: ${text.slice(0, 300)}`
     );
@@ -133,9 +133,9 @@ async function cmdMarkets(config) {
   if (markets.length === 0) fail("No tradeable markets right now.");
 
   // Every price here is a dollar string ("0.6100", "1.0000"), so the column is
-  // a straight format rather than a conversion. A US market settles at $1, so
-  // max_price is "1.0000" and quotes run $0.01-$0.99. Canada settles at $100
-  // and max_price is "100.0000". Read it off the market, do not assume.
+  // a straight format rather than a conversion. A market settles at $1, so
+  // max_price is "1.0000" and quotes run $0.01-$0.99. Read it off the market,
+  // do not assume.
   // Symbols are back-loaded: the leg that distinguishes sibling markets
   // (TOTAL-3_5 from TOTAL-4_5) is in the tail, and --market takes a symbol, so
   // this column has to survive intact. TITLE is last and absorbs the slack - a
@@ -192,10 +192,10 @@ async function cmdOrders(config) {
  * Place a limit order well away from the touch, then cancel it.
  *
  * Priced so it should rest rather than fill, but this is a real order on a real
- * book: on integration that costs nothing, on production it does not.
+ * book: on demo that costs nothing, on prod it does not.
  */
 async function cmdRoundtrip(config, args) {
-  if (config.environment === "production" && !args["force-production"]) {
+  if (config.env === "prod" && !args["force-production"]) {
     fail(
       `Refusing to place orders against production from an example script.\n` +
         `Profile [${config.profile}] points at ${config.baseUrl}.\n` +

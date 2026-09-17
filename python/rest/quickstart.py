@@ -8,7 +8,7 @@
 
 Add ``--profile <name>`` to use a profile other than ``[default]``:
 
-    python python/rest/quickstart.py --profile ca-integration markets
+    python python/rest/quickstart.py --profile ontario-demo markets
 
 Credentials come from ~/.stx/credentials, written by ``./configure``. Every
 /api/v1 route requires a signature, so even ``markets`` needs a key. ``roundtrip`` needs a ``read_write`` one.
@@ -67,7 +67,7 @@ def request(config, private_key, method, path, body=None):
             "401 unauthorized.\n"
             "  The signature, key id or timestamp was rejected. The most common causes:\n"
             "  - the key belongs to a different environment than "
-            f"{config['exchange']}/{config['environment']}\n"
+            f"{config['region']}/{config['env']}\n"
             "  - the machine clock is more than 30 seconds off\n"
             f"  Body: {response.text[:300]}"
         )
@@ -142,9 +142,9 @@ def cmd_markets(config, private_key, _args):
         sys.exit("No tradeable markets right now.")
 
     # Every price here is a dollar string ("0.6100", "1.0000"), so the column
-    # is a straight format rather than a conversion. A US market settles at $1,
-    # so max_price is "1.0000" and quotes run $0.01-$0.99. Canada settles at
-    # $100 and max_price is "100.0000". Read it off the market, do not assume.
+    # is a straight format rather than a conversion. A market settles at $1, so
+    # max_price is "1.0000" and quotes run $0.01-$0.99. Read it off the market,
+    # do not assume.
     # Symbols are back-loaded: the leg that distinguishes sibling markets
     # (TOTAL-3_5 from TOTAL-4_5) is in the tail, and --market takes a symbol,
     # so this column has to survive intact. TITLE is last and absorbs the
@@ -195,9 +195,9 @@ def cmd_roundtrip(config, private_key, args):
     """Place a limit order well away from the touch, then cancel it.
 
     Priced so it should rest rather than fill, but this is a real order on a
-    real book: on integration that costs nothing, on production it does not.
+    real book: on demo that costs nothing, on prod it does not.
     """
-    if config["environment"] == "production" and not args.force_production:
+    if config["env"] == "prod" and not args.force_production:
         sys.exit(
             "Refusing to place orders against production from an example script.\n"
             f"Profile [{config['profile']}] points at {config['base_url']}.\n"

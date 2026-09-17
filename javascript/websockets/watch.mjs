@@ -124,6 +124,7 @@ socket.onClose(() => console.error("socket closed"));
 
 socket.connect();
 
+// UTC, HH:MM:SS. All four watchers use the same clock.
 const stamp = () => new Date().toISOString().slice(11, 19);
 
 // Every stamped line goes through `line()` so BOOK, MARKET and the event rows

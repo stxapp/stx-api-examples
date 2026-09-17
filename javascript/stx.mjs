@@ -51,6 +51,14 @@ const LEGACY_ENVS = { integration: "demo", production: "prod" };
 const KNOWN_KEYS = ["region", "env", "key_id", "key_file", "base_url",
   "exchange", "environment", "private_key"];
 
+// Identify your client. NOT required: the API accepts a request with no
+// User-Agent. It is recorded against your API key though, so a recognisable
+// string is what lets support tell your traffic from everyone else's when you
+// report a problem. Change the product name to your own and keep the shape:
+//
+//   <product>/<version> (<runtime>)
+export const USER_AGENT = `stx-api-examples/1.0 (node/${process.versions.node})`;
+
 // The handshake path, and the path the handshake signature covers.
 export const SOCKET_PATH = "/socket/websocket";
 
@@ -250,6 +258,7 @@ export function signedHeaders(config, method, path) {
   const message = `${timestamp}${method.toUpperCase()}${path}`;
   const signature = sign(null, Buffer.from(message, "utf8"), config.privateKey);
   return {
+    "User-Agent": USER_AGENT,
     "X-STX-ACCESS-KEY": config.keyId,
     "X-STX-ACCESS-TIMESTAMP": timestamp,
     "X-STX-ACCESS-SIGNATURE": signature.toString("base64"),

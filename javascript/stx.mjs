@@ -3,7 +3,7 @@
 // Three things live here because they must be identical everywhere and because
 // a base URL should appear exactly once in this repository per language:
 //
-//   BASE_URLS      exchange + environment -> host. The one table for JavaScript.
+//   BASE_URLS      region + env -> host. The one table for JavaScript.
 //   loadProfile()  reads ~/.stx/credentials, the file ./configure writes.
 //   signedHeaders() the Ed25519 signing scheme, in about ten lines.
 //
@@ -19,30 +19,37 @@ import { join } from "node:path";
 // ---------------------------------------------------------------------------
 // Hosts
 //
-// `configure` stores an exchange and an environment, never a hostname, so this
-// table is the only place one appears.
+// A profile names a region and an environment, never a hostname, so this table
+// is the only place one appears. Only the public environments are listed; US
+// production is not open yet. Anything else goes in a `base_url` line.
 //
-// The US exchange settles markets at $1, so max_price is "1.0000" and quotes
-// run $0.01-$0.99. Canada settles at $100, so max_price is "100.0000" there.
-// Read max_price off the market rather than assuming either.
+// Markets settle at $1, so max_price is "1.0000" and quotes run $0.01-$0.99.
+// Read max_price off the market rather than assuming it.
 // ---------------------------------------------------------------------------
 
 export const BASE_URLS = {
-  "us/integration": "https://demo.stxapp.io",
-  "ca/integration": "https://api-staging.on.sportsxapp.com",
-  "ca/production": "https://api.on.stxapp.ca",
+  "us/demo": "https://demo.stxapp.io",
+  "ontario/demo": "https://demo.stxapp.ca",
+  "ontario/prod": "https://stxapp.ca",
 };
 
 // A host not in that table - a local server, a review app - is set with
-// STX_BASE_URL, or a `base_url` line in the profile. It wins over the pair:
+// STX_BASE_URL, or a `base_url` line in the profile. It wins over the table:
 //
-//   STX_BASE_URL=http://localhost:8000 node javascript/rest/quickstart.mjs markets
+//   STX_BASE_URL=http://localhost:8000 STX_ENV=local node javascript/rest/quickstart.mjs markets
 //
-// `exchange` and `environment` still apply, because they decide more than the
-// host: `roundtrip` and `latency.mjs` refuse to place orders when environment is
-// `production`. Point base_url at a real exchange and that guard is all that
-// stands between an example and a live book, so leave environment alone unless
-// you mean it.
+// `env` is still required alongside a base_url, because it decides more than
+// the host: `roundtrip` and `latency.mjs` refuse to place orders when env is
+// `prod`. Point base_url at a real exchange and that guard is all that stands
+// between an example and a live book, so set env truthfully.
+
+// Earlier versions of ./configure wrote `exchange`, `environment` and
+// `private_key`. They are still read, and translated, so an existing
+// credentials file keeps working.
+const LEGACY_REGIONS = { ca: "ontario" };
+const LEGACY_ENVS = { integration: "demo", production: "prod" };
+const KNOWN_KEYS = ["region", "env", "key_id", "key_file", "base_url",
+  "exchange", "environment", "private_key"];
 
 // The handshake path, and the path the handshake signature covers.
 export const SOCKET_PATH = "/socket/websocket";
@@ -99,16 +106,17 @@ function expandHome(path) {
  * Resolve one profile from ~/.stx/credentials.
  *
  * Environment variables win over the file, which is what you want in CI:
- * STX_PROFILE, STX_EXCHANGE, STX_ENVIRONMENT, STX_KEY_ID, STX_PRIVATE_KEY,
- * STX_BASE_URL.
+ * STX_PROFILE, STX_REGION, STX_ENV, STX_KEY_ID, STX_KEY_FILE, STX_BASE_URL.
  */
 export function loadProfile(name) {
   const profile = name || process.env.STX_PROFILE || "default";
   let values = {};
+  let hasSection = false;
 
   if (existsSync(CREDENTIALS_PATH)) {
     const sections = parseIni(readFileSync(CREDENTIALS_PATH, "utf8"));
     if (sections[profile]) {
+      hasSection = true;
       values = sections[profile];
     } else if (profile !== "default") {
       const available = Object.keys(sections).join(", ") || "none";
@@ -117,38 +125,65 @@ Run ./configure ${profile}`);
     }
   }
 
-  const pick = (envVar, key, fallback) => process.env[envVar] || values[key] || fallback;
-
-  const exchange = pick("STX_EXCHANGE", "exchange", "us");
-  const environment = pick("STX_ENVIRONMENT", "environment", "integration");
-
-  // A trailing slash would produce //api/v1, which some routers 404 on.
-  const override = (pick("STX_BASE_URL", "base_url") || "").replace(/\/+$/, "");
-  const baseUrl = override || BASE_URLS[`${exchange}/${environment}`];
-
-  if (!baseUrl) {
-    fail(`No host for exchange "${exchange}" environment "${environment}".
-Known: ${Object.keys(BASE_URLS).join(", ")}
-Set STX_BASE_URL to use a host that is not in that list.`);
+  // A misspelt key is otherwise silently ignored, and the profile quietly
+  // resolves to something you did not ask for.
+  const unknown = Object.keys(values).filter((k) => !KNOWN_KEYS.includes(k)).sort();
+  if (unknown.length) {
+    console.error(`warning: [${profile}] has unrecognised keys ${unknown.join(", ")}; ` +
+      `expected region, env, key_id, key_file, base_url`);
   }
 
-  const keyId = pick("STX_KEY_ID", "key_id");
-  const keyPath = pick("STX_PRIVATE_KEY", "private_key");
-  if (!keyId || !keyPath) {
-    fail(`Profile [${profile}] has no key_id or private_key. Run ./configure ${profile}`);
+  const pick = (envVars, keys) => {
+    for (const v of envVars) if (process.env[v]) return process.env[v];
+    for (const k of keys) if (values[k]) return values[k];
+    return undefined;
+  };
+
+  let region = pick(["STX_REGION", "STX_EXCHANGE"], ["region", "exchange"]);
+  let env = pick(["STX_ENV", "STX_ENVIRONMENT"], ["env", "environment"]);
+  region = LEGACY_REGIONS[region] || region;
+  env = LEGACY_ENVS[env] || env;
+
+  // A trailing slash would produce //api/v1, which some routers 404 on.
+  let baseUrl = (pick(["STX_BASE_URL"], ["base_url"]) || "").replace(/\/+$/, "");
+
+  if (baseUrl) {
+    if (!env) {
+      fail(`Profile [${profile}] sets base_url but no env. Add \`env = <name>\`
+(\`prod\` if that host takes real money) so the order guard knows.`);
+    }
+  } else {
+    if (!hasSection && !region && !env) {
+      // No profile and no overrides: the documented zero-config path,
+      // STX_KEY_ID and STX_KEY_FILE alone, against the US demo exchange.
+      region = "us";
+      env = "demo";
+    }
+    baseUrl = BASE_URLS[`${region}/${env}`];
+    if (!baseUrl) {
+      fail(`No host for region "${region ?? "(not set)"}" env "${env ?? "(not set)"}" in profile [${profile}].
+Known: ${Object.keys(BASE_URLS).join(", ")}
+For any other host add a base_url line.`);
+    }
+  }
+
+  const keyId = pick(["STX_KEY_ID"], ["key_id"]);
+  const keyFile = pick(["STX_KEY_FILE", "STX_PRIVATE_KEY"], ["key_file", "private_key"]);
+  if (!keyId || !keyFile) {
+    fail(`Profile [${profile}] has no key_id or key_file. Run ./configure ${profile}`);
   }
 
   return {
     profile,
-    exchange,
-    environment,
+    region,
+    env,
     baseUrl,
     // socketUrl is the real handshake URL, for a raw WebSocket client.
     // socketEndpoint is what `phoenix` wants - see SOCKET_ENDPOINT above.
     socketUrl: wsBase(baseUrl) + SOCKET_PATH,
     socketEndpoint: wsBase(baseUrl) + SOCKET_ENDPOINT,
     keyId,
-    privateKey: createPrivateKey(readFileSync(expandHome(keyPath))),
+    privateKey: createPrivateKey(readFileSync(expandHome(keyFile))),
   };
 }
 
@@ -206,7 +241,7 @@ export function unreachable(baseUrl, error) {
     `  ${reason}\n` +
     `  If that is a local server, check it is running and on that port.\n` +
     `  Unset STX_BASE_URL (or drop base_url from your profile) to go back\n` +
-    `  to the host for this exchange/environment pair.`
+    `  to the host for this region/env pair.`
   );
 }
 
@@ -282,7 +317,11 @@ export function argList(value) {
 //   order.quantity, order.filled "1.00"      contracts
 //
 // Money carries at least four decimals and quantities at least two, but the
-// width is a MINIMUM, not a promise: an order price can carry seven.
+// width is a MINIMUM, not a promise: a computed field such as a fee can carry
+// more.
+//
+// An order price is a whole number of cents: at most two decimal places, not
+// counting trailing zeros. "0.49" and "0.4900" are accepted, "0.495" is a 400.
 //
 // Not every number is money. `price_change24h` is a percentage and `points` are
 // loyalty points; both stay plain JSON numbers. Convert what is an amount of
@@ -322,23 +361,24 @@ export function fmtMoney(value, places = 2) {
 }
 
 /**
- * A number as the dollar string the API takes for an order price.
+ * A price as the dollar string the API takes for an order: 0.51 -> "0.5100".
  *
- * At least four decimals, matching the width the server echoes back, but never
- * fewer than the value carries: a price may hold up to seven, and rounding one
- * off here would quietly place a different order.
+ * Four decimals, matching the width the server echoes back. The input side is
+ * looser than the output - "0.51" and "0.5100" are the same order - so you
+ * never have to match the server's width.
  *
- * The input side is looser than the output - "0.51", "0.5100" and "0.510000"
- * are the same order - so you never have to match the server's width.
- *
- * Capped at seven, which is the server's own limit, because float64 noise would
- * otherwise reach the wire: `0.24 - 0.1` is 0.13999999999999999 here, and
- * sending that verbatim is a `400 price supports at most 7 decimal places`.
- * Seven decimals is past any real quote, so the cap only ever trims the noise.
- * python/stx.py needs no equivalent - Decimal arithmetic never produces it.
+ * A price must be a whole number of cents. float64 noise is rounded away, since
+ * `0.24 - 0.1` is 0.13999999999999999 here and means 14 cents. A value that is
+ * genuinely finer, such as 0.495, throws instead of being rounded, because
+ * rounding would quietly place a different order, and sending it is a 400.
  */
 export function dollarString(value) {
   const number = Number(value);
-  const carried = (String(number).split(".")[1] ?? "").length;
-  return number.toFixed(Math.min(7, Math.max(4, carried)));
+  const cents = Math.round(number * 100);
+  if (!Number.isFinite(number) || Math.abs(number * 100 - cents) > 1e-6) {
+    throw new Error(
+      `price ${value} is not a whole number of cents; prices take at most two decimal places`
+    );
+  }
+  return (cents / 100).toFixed(4);
 }

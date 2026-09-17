@@ -2,14 +2,14 @@
   "info": {
     "_postman_id": "b7f1c0de-0000-4000-8000-5f7a9b1c2d00",
     "name": "STX REST API (/api/v1)",
-    "description": "The STX exchange REST API. Every route requires an Ed25519 signature, and this\ncollection signs for you.\n\n## Setup\n\n1. Set `key_id` in the collection variables. `base_url` already points at\n`https://demo.stxapp.io`, the US integration exchange.\n2. Create an **environment** and add `stx_private_key`: either the PKCS#8 PEM\nshown once when the API key was created, or the raw 32-byte seed as base64.\nBoth are accepted.\n3. Send any request.\n\n**Keep the key in an environment, not in the collection.** Collection variables\nare included when you export or share a collection; environment values you keep\nlocal are not. This collection deliberately does not declare `stx_private_key`.\n\n`Get an order` and `Cancel an order` need `order_id`, and `Place an order` reads\n`market_id` from its body. Run `List markets` and `Place an order` first, or set\nthose variables by hand.\n\n## How signing works\n\nThe collection's pre-request script inlines tweetnacl-js v1.0.3 (public domain)\nbecause Postman's sandbox has no Ed25519 primitive and will not let a script\n`require` one. It signs locally and sets the three `X-STX-ACCESS-*` headers; no\nkey material leaves your machine. `newman` runs the same script, so this works\nin CI and on Windows without a shell.\n\nThe signed message is `timestamp + METHOD + path`, concatenated with no\nseparators. The path **includes the query string** exactly as sent. The **body is\nnot signed**. The timestamp is Unix milliseconds and must be within 30 seconds\nof the server clock.\n\n## Variables\n\n| Variable | Where | What |\n| --- | --- | --- |\n| `base_url` | collection | Exchange host. Pre-filled for US integration. |\n| `key_id` | collection | Your API key id. |\n| `stx_private_key` | **environment** | Ed25519 private key, PEM or base64 seed. |\n| `market_id` | collection | Set from a `List markets` response. |\n| `order_id` | collection | Set from a `Place an order` response. |\n| `timestamp`, `signature` | collection | Only for signing by hand; leave empty otherwise. |\n\n## If a request returns 401\n\nThe server returns the same `Missing or invalid API key credentials` for every\nauthentication failure, so the status alone will not tell you which. In order of\nlikelihood:\n\n1. `stx_private_key` is unset, or the wrong environment is selected.\n2. `key_id` does not match that private key.\n3. Your clock is more than 30 seconds off. Check NTP.\n4. The key lacks the scope for the route: placing and cancelling need\n`read_write`.\n\n## Money and quantities\n\nFixed-point decimal strings, in dollars: `price: \"0.5400\"`,\n`max_price: \"1.0000\"`, `quantity: \"1.00\"`. Never cents, never a JSON number - on\n`POST /orders` both `price` and `quantity` must be strings, and a number is a\n400. The width is a minimum, not a promise - an order price can carry seven\ndecimals - so parse with a variable-scale decimal type. `price_change24h` is a\npercentage and stays a number. A market's ceiling is its own `max_price`\n(`\"1.0000\"` on a US $1 market, `\"100.0000\"` on a Canadian $100 one), not a fixed\n99.\n\n## More\n\nKey creation, the openssl signing fallback and the runnable Python/JavaScript\nexamples are in the repository:\nhttps://github.com/stxapp/stx-api-examples - see `postman/README.md` for this\ncollection specifically. Full API reference: https://docs.stxapp.io",
+    "description": "The STX exchange REST API. Every route requires an Ed25519 signature, and this\ncollection signs for you.\n\n## Setup\n\n1. Set `key_id` in the collection variables. `base_url` already points at\n`https://demo.stxapp.io`, the US demo exchange.\n2. Create an **environment** and add `stx_private_key`: either the PKCS#8 PEM\nshown once when the API key was created, or the raw 32-byte seed as base64.\nBoth are accepted.\n3. Send any request.\n\n**Keep the key in an environment, not in the collection.** Collection variables\nare included when you export or share a collection; environment values you keep\nlocal are not. This collection deliberately does not declare `stx_private_key`.\n\n`Get an order` and `Cancel an order` need `order_id`, and `Place an order` reads\n`market_id` from its body. Run `List markets` and `Place an order` first, or set\nthose variables by hand.\n\n## How signing works\n\nThe collection's pre-request script inlines tweetnacl-js v1.0.3 (public domain)\nbecause Postman's sandbox has no Ed25519 primitive and will not let a script\n`require` one. It signs locally and sets the three `X-STX-ACCESS-*` headers; no\nkey material leaves your machine. `newman` runs the same script, so this works\nin CI and on Windows without a shell.\n\nThe signed message is `timestamp + METHOD + path`, concatenated with no\nseparators. The path **includes the query string** exactly as sent. The **body is\nnot signed**. The timestamp is Unix milliseconds and must be within 30 seconds\nof the server clock.\n\n## Variables\n\n| Variable | Where | What |\n| --- | --- | --- |\n| `base_url` | collection | Exchange host. Pre-filled for US demo. |\n| `key_id` | collection | Your API key id. |\n| `stx_private_key` | **environment** | Ed25519 private key, PEM or base64 seed. |\n| `market_id` | collection | Set from a `List markets` response. |\n| `order_id` | collection | Set from a `Place an order` response. |\n| `timestamp`, `signature` | collection | Only for signing by hand; leave empty otherwise. |\n\n## If a request returns 401\n\nThe server returns the same `Missing or invalid API key credentials` for every\nauthentication failure, so the status alone will not tell you which. In order of\nlikelihood:\n\n1. `stx_private_key` is unset, or the wrong environment is selected.\n2. `key_id` does not match that private key, or the key belongs to another\nenvironment. A demo key does not work in production; create a production key at\nhttps://stxapp.ca.\n3. Your clock is more than 30 seconds off. Check NTP.\n4. The key lacks the scope for the route: placing and cancelling need\n`read_write`.\n\n## Money and quantities\n\nFixed-point decimal strings, in dollars: `price: \"0.5400\"`,\n`max_price: \"1.0000\"`, `quantity: \"1.00\"`. Never cents, never a JSON number - on\n`POST /orders` both `price` and `quantity` must be strings, and a number is a\n400. An order price takes at most two decimal places: `\"0.49\"` and `\"0.4900\"`\nare accepted, `\"0.495\"` is a 400. Response widths are a minimum, not a promise -\na fee can carry more decimals - so parse with a variable-scale decimal type.\n`price_change24h` is a percentage and stays a number. A market's ceiling is its own `max_price`\n(`\"1.0000\"` on a $1 market), not a fixed\n99.\n\n## More\n\nKey creation, the openssl signing fallback and the runnable Python/JavaScript\nexamples are in the repository:\nhttps://github.com/stxapp/stx-api-examples - see `postman/README.md` for this\ncollection specifically. Full API reference: https://docs.stxapp.io",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
     {
       "key": "base_url",
       "value": "https://demo.stxapp.io",
-      "description": "US integration. Canada integration is https://api-staging.on.sportsxapp.com; Canada production is https://api.on.stxapp.ca."
+      "description": "US demo. Ontario demo is https://demo.stxapp.ca; Ontario production is https://stxapp.ca, which needs a production key. US production is not open yet."
     },
     {
       "key": "key_id",
@@ -207,7 +207,7 @@
                 "orders"
               ]
             },
-            "description": "Returns 200 (not 201) as {\"order\": {...}}.\n\nThe body is FLAT: wrapping it in {\"user_order\": {...}} returns 400.\n\n`price` is a dollar amount as a STRING, strictly greater than 0 and below the market's max_price. Sending a number is a 400: an integer used to mean cents, and reading 51 as $51.00 would be a 100x overprice, so the server rejects it rather than guessing. Any width from 0 to 7 decimals is accepted - `\"0.42\"`, `\"0.4200\"` and `\"0.42000\"` are the same order - and the response echoes it at 4.\n\n`quantity` is a decimal string too, greater than zero - `\"10\"` and `\"10.00\"` are read the same. A number is rejected rather than converted, the same rule `price` follows but for a different reason: a float arrives as a binary double, so the size that rests on the book would not always be the size that was sent.\n\nA price over the cap is 422 \"The order's price must be lower than 1.00\".\n\nNeeds a read_write key.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}.",
+            "description": "Returns 200 (not 201) as {\"order\": {...}}.\n\nThe body is FLAT: wrapping it in {\"user_order\": {...}} returns 400.\n\n`price` is a dollar amount as a STRING, strictly greater than 0 and below the market's max_price. Sending a number is a 400: an integer used to mean cents, and reading 51 as $51.00 would be a 100x overprice, so the server rejects it rather than guessing. A price takes at most two decimal places, not counting trailing zeros: `\"0.42\"` and `\"0.4200\"` are the same order, and the response echoes it at 4. `\"0.555\"` is a 400: `price must be a whole number of cents — at most 2 decimal places, not counting trailing zeros (got \"0.555\")`.\n\n`quantity` is a decimal string too, greater than zero - `\"10\"` and `\"10.00\"` are read the same. A number is rejected rather than converted, the same rule `price` follows but for a different reason: a float arrives as a binary double, so the size that rests on the book would not always be the size that was sent.\n\nA price over the cap is 422 \"The order's price must be lower than 1.00\".\n\nNeeds a read_write key.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"market_id\": \"{{market_id}}\",\n  \"order_type\": \"limit\",\n  \"action\": \"buy\",\n  \"price\": \"0.42\",\n  \"quantity\": \"5\",\n  \"client_order_id\": \"postman-1\"\n}",
@@ -632,6 +632,106 @@
               ]
             },
             "description": "Returns {cursor, withdrawals: [...]}.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "List fees",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/portfolio/fees?limit=50",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "portfolio",
+                "fees"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "From the previous response. Enable it, and paste the value, to fetch the next page.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Returns {cursor, fees: [...]}, most recent first: `fee` and `fee_refund` entries from every fee source. `amount` is the signed effect on the balance, in dollars, so summing it nets fees paid.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
+          },
+          "response": []
+        },
+        {
+          "name": "List adjustments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/portfolio/adjustments?limit=50",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "portfolio",
+                "adjustments"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "cursor",
+                  "value": "",
+                  "description": "From the previous response. Enable it, and paste the value, to fetch the next page.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Returns {cursor, adjustments: [...]}, most recent first: manual corrections to the balance, with the recorded reason. `amount` may be either sign.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
           },
           "response": []
         },

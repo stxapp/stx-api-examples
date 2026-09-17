@@ -2,8 +2,9 @@
 # configure - write STX API credentials to ~/.stx/, safely.
 #
 # Creates (or replaces) one profile in ~/.stx/credentials and copies its private
-# key to ~/.stx/<profile>.pem. Every example in this repository reads that file,
-# so this is the only place credentials are entered.
+# key to ~/.stx/<profile>.pem, recorded in the profile as `key_file`. Every
+# example in this repository reads that file, so this is the only place
+# credentials are entered.
 #
 #     ./configure                 # writes the [default] profile
 #     ./configure us-demo         # writes the [us-demo] profile
@@ -95,29 +96,29 @@ echo "Configuring profile [$PROFILE]."
 echo
 
 # ---------------------------------------------------------------------------
-# Which exchange, and which environment on it.
+# Which region, and which environment in it.
 #
 # These two values are all that is stored: each language resolves them to a base
 # URL through its own single table, so a hostname is never pasted into a script
-# or a credentials file.
+# or a credentials file. For any other host, add a `base_url` line by hand.
 # ---------------------------------------------------------------------------
 
-echo "Which exchange?"
-EXCHANGE=$(choose "  exchange" "us" "ca")
+echo "Which region?"
+REGION=$(choose "  region" "us" "ontario")
 echo
 
 echo "Which environment?"
-if [ "$EXCHANGE" = "us" ]; then
-    # US production is not published for API-key clients yet.
-    ENVIRONMENT=$(choose "  environment" "integration")
+if [ "$REGION" = "us" ]; then
+    # US production is not open to API-key clients yet.
+    ENV=$(choose "  env" "demo")
 else
-    ENVIRONMENT=$(choose "  environment" "integration" "production")
+    ENV=$(choose "  env" "demo" "prod")
 fi
 echo
 
-if [ "$ENVIRONMENT" = "production" ]; then
+if [ "$ENV" = "prod" ]; then
     echo "! [$PROFILE] will point at a real-money exchange."
-    echo "  Orders placed with it are real. Build against integration first."
+    echo "  Orders placed with it are real. Build against demo first."
     echo
 fi
 
@@ -230,17 +231,17 @@ mv "$TMP_CREDENTIALS.trimmed" "$TMP_CREDENTIALS"
 {
     if [ -s "$TMP_CREDENTIALS" ]; then echo ""; fi
     echo "[$PROFILE]"
-    echo "exchange = $EXCHANGE"
-    echo "environment = $ENVIRONMENT"
+    echo "region = $REGION"
+    echo "env = $ENV"
     echo "key_id = $KEY_ID"
-    echo "private_key = $KEY_PATH"
+    echo "key_file = $KEY_PATH"
 } >> "$TMP_CREDENTIALS"
 
 mv "$TMP_CREDENTIALS" "$CREDENTIALS"
 chmod 600 "$CREDENTIALS"
 
 echo "Wrote:"
-echo "  $CREDENTIALS   [$PROFILE] -> $EXCHANGE/$ENVIRONMENT"
+echo "  $CREDENTIALS   [$PROFILE] -> $REGION/$ENV"
 echo "  $KEY_PATH"
 echo
 echo "Next:"

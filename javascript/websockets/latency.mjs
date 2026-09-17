@@ -83,11 +83,11 @@ if (!Number.isInteger(rounds)) {
 }
 
 
-if (config.environment === "production" && !args["force-production"]) {
+if (config.env === "prod" && !args["force-production"]) {
   fail(
     `Refusing to place orders against production.\n` +
       `Profile [${config.profile}] points at ${config.baseUrl}.\n` +
-      `Run this against an integration profile, or pass --force-production if you\n` +
+      `Run this against a demo profile, or pass --force-production if you\n` +
       `really mean to put real orders on a real book.`
   );
 }

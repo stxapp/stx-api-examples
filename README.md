@@ -32,6 +32,40 @@ cd stx-api-examples
 but `curl` and `openssl`. If it prints a `user_id`, everything else here will
 work.
 
+**On macOS, install OpenSSL 3.** The `openssl` macOS ships is LibreSSL, which
+cannot generate or sign with Ed25519 keys, so `./verify` fails with `openssl
+produced no signature`. `./install.sh` warns when it finds LibreSSL.
+
+```sh
+brew install openssl@3
+export PATH="$(brew --prefix openssl@3)/bin:$PATH"   # add to ~/.zshrc to keep it
+```
+
+`./configure` writes one profile per key to `~/.stx/credentials`:
+
+```ini
+[ontario-prod]
+region   = ontario                     # us | ontario
+env      = prod                        # demo | prod
+key_id   = <your key id>
+key_file = ~/.stx/ontario-prod.pem
+```
+
+| region | env | host |
+| --- | --- | --- |
+| `us` | `demo` | `demo.stxapp.io` |
+| `ontario` | `demo` | `demo.stxapp.ca` |
+| `ontario` | `prod` | `stxapp.ca` (real money) |
+
+US production is not open yet. `./configure` and `./verify` take the profile name
+as an argument (`./verify ontario-demo`); the Python and JavaScript scripts take
+`--profile ontario-demo`. Profiles from earlier versions, with `exchange`,
+`environment` and `private_key`, still work.
+
+**A key belongs to one environment.** Demo keys do not work in production: to
+move to production, create a new key at [stxapp.ca](https://stxapp.ca) and
+`./configure ontario-prod` with it.
+
 [**GETTING_STARTED.md**](./GETTING_STARTED.md) walks through all of this one
 step at a time, including creating the key, with the output you should expect at
 each step.
@@ -52,8 +86,8 @@ book, in both runtimes, on your own network path.
 [Measure the round trip](./GETTING_STARTED.md#7-measure-the-round-trip)
 
 Everything authenticates with an
-[Ed25519 API key](./GETTING_STARTED.md#signing) and runs against the US
-integration environment by default;
+[Ed25519 API key](./GETTING_STARTED.md#signing) and runs against the US demo
+environment by default;
 [`--profile`](./GETTING_STARTED.md#3-store-the-credentials-and-prove-they-sign)
 selects another.
 
@@ -64,7 +98,8 @@ selects another.
 - **REST money and quantities are dollar strings.** `price: "0.5400"`,
   `max_price: "1.0000"`, `quantity: "1.00"` - never cents, never a JSON number.
   On `POST /api/v1/orders`, `price` and `quantity` must both be strings; a
-  number is a `400`. The WebSocket topics match REST field for field.
+  number is a `400`. A price takes at most two decimal places: `"0.49"` and
+  `"0.4900"` are accepted, `"0.495"` is a `400`. The WebSocket topics match REST field for field.
   [Prices](./GETTING_STARTED.md#prices) has the detail.
 - **The JavaScript REST examples have no dependencies.** Node has Ed25519 in
   `node:crypto` and `fetch` built in. Only the WebSocket examples use packages.
@@ -73,8 +108,8 @@ selects another.
 - **`./configure` never takes key material as an argument** and never prints
   your private key.
 - **`STX_BASE_URL` points the examples at any host**, such as a server running
-  on your own machine: `STX_BASE_URL=http://localhost:8000 python
-  python/rest/quickstart.py markets`. See
+  on your own machine, and needs an env with it: `STX_BASE_URL=http://localhost:8000
+  STX_ENV=local python python/rest/quickstart.py markets`. See
   [Pointing at another host](./GETTING_STARTED.md#pointing-at-another-host).
 - **The latency examples place real orders.** They rest below the touch so they
   do not fill, cancel what they place, and refuse a production profile.

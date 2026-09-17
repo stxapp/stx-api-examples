@@ -1,7 +1,7 @@
 # WebSocket channels
 
-Every channel the STX socket exposes, with the frame to join it and the payload
-it sends. Public payloads are captured from `demo.stxapp.io`; private ones are
+The channels these examples use, with the frame to join each and the payload it
+sends. Public payloads are captured from `demo.stxapp.io`; private ones are
 shortened to the fields worth showing.
 
 Money is a decimal string in dollars, matching `/api/v1` field for field, so a
@@ -9,12 +9,13 @@ REST snapshot and a socket delta can be mixed without converting anything.
 
 One authenticated socket carries all of them. Sign the handshake and join
 whatever you need on that one connection: `python/websockets/watch.py` joins
-seven, and the rest are here because they exist and are joinable, not because an
-example uses them.
+seven, and `watch_channel.py` joins any topic you name. This page is not a list of
+every topic the socket serves.
 
-Sign for every channel. The user-scoped channels reject an unsigned join with
-`{"reason": "unauthorized"}`, and the market channels are expected to require a
-signature in future, so there is nothing to gain by treating them differently.
+Private topics need a signed socket: the user-scoped channels reject a join on
+an unsigned one with `{"reason": "unauthorized"}`. `orderbook`, `ticker`,
+`trades`, `markets` and `market_updates` also join on an unsigned socket, but one
+signed socket can carry everything, so there is no need for a second connection.
 
 Frames are `[join_ref, ref, topic, event, payload]`. The handshake, profile
 setup and the walkthrough that gets you to a live order are in
@@ -235,8 +236,9 @@ moves. Fetch `GET /api/v1/markets` for the initial state.
 
 `ticker` is a **price summary**, not a discovery feed: a fixed field set,
 complete on every push, sent only when the price, book top, volume or open
-interest moved. Nothing on this socket reports a market being *created*, so poll
-`GET /api/v1/markets` to notice one appearing.
+interest moved. It does not report a market being *created*: join `markets`
+(event `market_created`) or `market_updates` (event `created`) for that, or poll
+`GET /api/v1/markets`. Neither topic is used by these examples.
 
 Note also that `ticker` has no `market_ids` filter. Watching one market means
 narrowing by sport or competition and then dropping the rest on `market_id`
@@ -386,12 +388,16 @@ account, and each socket receives only its own account's frames.
  "total_deposits": "10000.00", "total_withdrawals": "0.0000",
  "total_settlement_pnl": "0.7300", "total_fees": "0.0000",
  "total_adjustments": "0.0000", "escrow": "0.0000",
- "total_trade_count": 4, "base_fee_percent": 0.02,
+ "total_trade_count": 4, "total_traded": "4.0200",
+ "loyalty_tier": "rookie", "points": 12,
+ "base_fee_percent": null,
  "fee_schedule": "on_trade", "taker_factor": 0.02, "maker_factor": 0.0}
 ```
 
-`total_trade_count` is a count and the three factor/percent fields are rates, so
-those stay numbers. Spendable balance is rounded **down** and liabilities **up**,
+`total_trade_count` is a count, `points` are loyalty points and the three
+factor/percent fields are rates, so those stay numbers; `total_traded` is money
+and a dollar string like the rest. `base_fee_percent` can be `null`, and
+`loyalty_tier` is a string. Spendable balance is rounded **down** and liabilities **up**,
 at cent precision, so neither is ever overstated in your favour.
 
 The server does not compute portfolio market value; combine positions with market

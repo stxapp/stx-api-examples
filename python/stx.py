@@ -3,7 +3,7 @@
 Three things live here because they must be identical everywhere and because a
 base URL should appear exactly once in this repository per language:
 
-  * ``BASE_URLS``   - exchange + environment -> host. The one table for Python.
+  * ``BASE_URLS``   - region + env -> host. The one table for Python.
   * ``load_profile`` - reads ~/.stx/credentials, the file ``./configure`` writes.
   * ``signed_headers`` - the Ed25519 signing scheme, in about ten lines.
 
@@ -23,30 +23,39 @@ from cryptography.hazmat.primitives import serialization
 # ---------------------------------------------------------------------------
 # Hosts
 #
-# `configure` stores an exchange and an environment, never a hostname, so that
-# this table is the only place one appears.
+# A profile names a region and an environment, never a hostname, so that this
+# table is the only place one appears. Only the public environments are listed,
+# and US production is not open yet; anything else goes in a `base_url` line.
 #
-# The US exchange settles markets at $1, so `max_price` is "1.0000" and quotes
-# run $0.01-$0.99. Canada settles at $100, so `max_price` is "100.0000" there.
-# Read `max_price` off the market rather than assuming either.
+# Markets settle at $1, so `max_price` is "1.0000" and quotes run $0.01-$0.99.
+# Read `max_price` off the market rather than assuming it.
 # ---------------------------------------------------------------------------
 
 BASE_URLS = {
-    ("us", "integration"): "https://demo.stxapp.io",
-    ("ca", "integration"): "https://api-staging.on.sportsxapp.com",
-    ("ca", "production"): "https://api.on.stxapp.ca",
+    ("us", "demo"): "https://demo.stxapp.io",
+    ("ontario", "demo"): "https://demo.stxapp.ca",
+    ("ontario", "prod"): "https://stxapp.ca",
 }
 
 # A host not in that table - a local server, a review app - is set with
-# STX_BASE_URL, or a `base_url` line in the profile. It wins over the pair:
+# STX_BASE_URL, or a `base_url` line in the profile. It wins over the table:
 #
-#     STX_BASE_URL=http://localhost:8000 python python/rest/quickstart.py markets
+#     STX_BASE_URL=http://localhost:8000 STX_ENV=local \
+#         python python/rest/quickstart.py markets
 #
-# `exchange` and `environment` still apply, because they decide more than the
-# host: `roundtrip` and `latency.py` refuse to place orders when environment is
-# `production`. Point base_url at a real exchange and that guard is all that
-# stands between an example and a live book, so leave environment alone unless
-# you mean it.
+# `env` is still required alongside a base_url, because it decides more than
+# the host: `roundtrip` and `latency.py` refuse to place orders when env is
+# `prod`. Point base_url at a real exchange and that guard is all that stands
+# between an example and a live book, so set env truthfully.
+
+# Earlier versions of ./configure wrote `exchange`, `environment` and
+# `private_key`. They are still read, and translated, so an existing
+# credentials file keeps working.
+LEGACY_REGIONS = {"ca": "ontario"}
+LEGACY_ENVS = {"integration": "demo", "production": "prod"}
+KNOWN_KEYS = {"region", "env", "key_id", "key_file", "base_url",
+              "exchange", "environment", "private_key"}
+
 SOCKET_PATH = "/socket/websocket"
 CREDENTIALS_PATH = os.path.expanduser(
     os.environ.get("STX_CREDENTIALS", "~/.stx/credentials")
@@ -57,16 +66,19 @@ def load_profile(name=None):
     """Resolve one profile from ~/.stx/credentials into a config dict.
 
     Environment variables win over the file, which is what you want in CI:
-    STX_PROFILE, STX_EXCHANGE, STX_ENVIRONMENT, STX_KEY_ID, STX_PRIVATE_KEY,
-    STX_BASE_URL.
+    STX_PROFILE, STX_REGION, STX_ENV, STX_KEY_ID, STX_KEY_FILE, STX_BASE_URL.
     """
     name = name or os.environ.get("STX_PROFILE", "default")
     values = {}
+    has_section = False
 
     if os.path.exists(CREDENTIALS_PATH):
-        parser = configparser.ConfigParser()
+        # Inline comments, as in `env = demo  # demo | prod`, are stripped the
+        # same way ./verify and stx.mjs strip them.
+        parser = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
         parser.read(CREDENTIALS_PATH)
         if parser.has_section(name):
+            has_section = True
             values = dict(parser.items(name))
         elif name != "default":
             sys.exit(
@@ -74,38 +86,66 @@ def load_profile(name=None):
                 f"Available: {parser.sections() or 'none'}. Run ./configure {name}"
             )
 
-    def pick(env_var, key, default=None):
-        return os.environ.get(env_var) or values.get(key) or default
+    # A misspelt key is otherwise silently ignored, and the profile quietly
+    # resolves to something you did not ask for.
+    unknown = sorted(set(values) - KNOWN_KEYS)
+    if unknown:
+        print(f"warning: [{name}] has unrecognised keys {unknown}; "
+              f"expected {sorted(KNOWN_KEYS - {'exchange', 'environment', 'private_key'})}",
+              file=sys.stderr)
 
-    exchange = pick("STX_EXCHANGE", "exchange", "us")
-    environment = pick("STX_ENVIRONMENT", "environment", "integration")
+    def pick(env_vars, keys):
+        for var in env_vars:
+            if os.environ.get(var):
+                return os.environ[var]
+        for key in keys:
+            if values.get(key):
+                return values[key]
+        return None
+
+    region = pick(["STX_REGION", "STX_EXCHANGE"], ["region", "exchange"])
+    env = pick(["STX_ENV", "STX_ENVIRONMENT"], ["env", "environment"])
+    region = LEGACY_REGIONS.get(region, region)
+    env = LEGACY_ENVS.get(env, env)
 
     # A trailing slash would produce //api/v1, which some routers 404 on.
-    base_url = (pick("STX_BASE_URL", "base_url") or "").rstrip("/")
-    if not base_url:
-        base_url = BASE_URLS.get((exchange, environment))
-    if not base_url:
-        known = ", ".join(f"{e}/{v}" for e, v in sorted(BASE_URLS))
-        sys.exit(
-            f"No host for exchange={exchange!r} environment={environment!r}. "
-            f"Known: {known}. Set STX_BASE_URL to use a host that is not in that list."
-        )
+    base_url = (pick(["STX_BASE_URL"], ["base_url"]) or "").rstrip("/")
 
-    key_id = pick("STX_KEY_ID", "key_id")
-    key_path = pick("STX_PRIVATE_KEY", "private_key")
-    if not key_id or not key_path:
+    if base_url:
+        if not env:
+            sys.exit(
+                f"Profile [{name}] sets base_url but no env. Add `env = <name>` "
+                f"(`prod` if that host takes real money) so the order guard knows."
+            )
+    else:
+        if not has_section and not region and not env:
+            # No profile and no overrides: the documented zero-config path,
+            # STX_KEY_ID and STX_KEY_FILE alone, against the US demo exchange.
+            region, env = "us", "demo"
+        base_url = BASE_URLS.get((region, env))
+        if not base_url:
+            known = ", ".join(f"{r}/{e}" for r, e in sorted(BASE_URLS))
+            sys.exit(
+                f"No host for region={region or '(not set)'!s} env={env or '(not set)'!s} "
+                f"in profile [{name}]. "
+                f"Known: {known}. For any other host add a base_url line."
+            )
+
+    key_id = pick(["STX_KEY_ID"], ["key_id"])
+    key_file = pick(["STX_KEY_FILE", "STX_PRIVATE_KEY"], ["key_file", "private_key"])
+    if not key_id or not key_file:
         sys.exit(
-            f"Profile [{name}] has no key_id or private_key. Run ./configure {name}"
+            f"Profile [{name}] has no key_id or key_file. Run ./configure {name}"
         )
 
     return {
         "profile": name,
-        "exchange": exchange,
-        "environment": environment,
+        "region": region,
+        "env": env,
         "base_url": base_url,
         "socket_url": socket_url(base_url),
         "key_id": key_id,
-        "key_path": os.path.expanduser(key_path),
+        "key_path": os.path.expanduser(key_file),
     }
 
 
@@ -133,7 +173,7 @@ def unreachable(base_url, error):
         f"  {error}\n"
         f"  If that is a local server, check it is running and on that port.\n"
         f"  Unset STX_BASE_URL (or drop base_url from your profile) to go back\n"
-        f"  to the host for this exchange/environment pair."
+        f"  to the host for this region/env pair."
     )
 
 
@@ -195,9 +235,9 @@ def signed_headers(private_key, key_id, method, path):
 #   order["quantity"], ["filled"]  "1.00"      contracts
 #
 # Money carries at least four decimals and quantities at least two, but the
-# width is a MINIMUM, not a promise: an order price can carry seven. Parse with
-# a variable-scale decimal type - Decimal here - and never with a fixed-width
-# reader.
+# width is a MINIMUM, not a promise: a computed field such as a fee can carry
+# more. Parse with a variable-scale decimal type - Decimal here - and never with
+# a fixed-width reader.
 #
 # Not every number is money. `price_change24h` is a percentage and `points` are
 # loyalty points; both stay plain JSON numbers. Convert what is an amount of
@@ -210,6 +250,9 @@ def signed_headers(private_key, key_id, method, path):
 # float arrives as an IEEE-754 double, so a sent 2.675 would rest on the book as
 # 2.67499999999999982... Integers are exact, but accepting them while refusing
 # floats is harder to state than to follow, so every number is a 400.
+#
+# An order price is a whole number of cents: at most two decimal places, not
+# counting trailing zeros. "0.49" and "0.4900" are accepted, "0.495" is a 400.
 # ---------------------------------------------------------------------------
 
 
@@ -232,17 +275,21 @@ def fmt_money(value, places=2):
 
 
 def dollar_string(value):
-    """A ``Decimal`` as the dollar string the API takes for an order price.
+    """A price as the dollar string the API takes for an order: "0.51" -> "0.5100".
 
-    At least four decimals, matching the width the server echoes back, but never
-    fewer than the value carries: a price may hold up to seven, and rounding one
-    off here would quietly place a different order. This mirrors how the server
-    formats money on the way out.
+    Four decimals, matching the width the server echoes back. The input side is
+    looser than the output - "0.51" and "0.5100" are the same order - so you
+    never have to match the server's width.
 
-    The input side is looser than the output - "0.51", "0.5100" and "0.510000"
-    are the same order - so you never have to match the server's width.
+    A price must be a whole number of cents. Anything finer, such as "0.495",
+    raises here instead of being rounded, because rounding would quietly place a
+    different order, and sending it is a 400 from the server anyway.
     """
-    value = Decimal(value)
-    scale = max(4, -value.normalize().as_tuple().exponent)
-    return f"{value:.{scale}f}"
+    value = Decimal(str(value))
+    if value != value.quantize(Decimal("0.01")):
+        raise ValueError(
+            f"price {value} is not a whole number of cents; "
+            f"prices take at most two decimal places"
+        )
+    return f"{value:.4f}"
 

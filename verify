@@ -155,6 +155,11 @@ sign() {
         | openssl base64 -A
 }
 
+# Identify the client. Not required, but it is logged against the key, so a
+# recognisable string is what lets support find your calls. Same shape as the
+# Python and JavaScript examples: <product>/<version> (<runtime>).
+USER_AGENT="stx-api-examples/1.0 (sh)"
+
 METHOD="GET"
 REQUEST_PATH="/api/v1/me"
 TIMESTAMP="$(date +%s)000"
@@ -183,6 +188,7 @@ echo
 RESPONSE_FILE=$(mktemp)
 
 STATUS=$(curl -sS -o "$RESPONSE_FILE" -w '%{http_code}' \
+    -A "$USER_AGENT" \
     -H "X-STX-ACCESS-KEY: $KEY_ID" \
     -H "X-STX-ACCESS-TIMESTAMP: $TIMESTAMP" \
     -H "X-STX-ACCESS-SIGNATURE: $SIGNATURE" \

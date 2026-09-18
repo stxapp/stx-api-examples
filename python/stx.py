@@ -16,6 +16,7 @@ import configparser
 import os
 import sys
 import time
+import platform
 from decimal import Decimal
 
 from cryptography.hazmat.primitives import serialization
@@ -55,6 +56,14 @@ LEGACY_REGIONS = {"ca": "ontario"}
 LEGACY_ENVS = {"integration": "demo", "production": "prod"}
 KNOWN_KEYS = {"region", "env", "key_id", "key_file", "base_url",
               "exchange", "environment", "private_key"}
+
+# Identify your client. NOT required: the API accepts a request with no
+# User-Agent. It is recorded against your API key though, so a recognisable
+# string is what lets support tell your traffic from everyone else's when you
+# report a problem. Change the product name to your own and keep the shape:
+#
+#     <product>/<version> (<runtime>)
+USER_AGENT = f"stx-api-examples/1.0 (python/{platform.python_version()})"
 
 SOCKET_PATH = "/socket/websocket"
 CREDENTIALS_PATH = os.path.expanduser(
@@ -219,6 +228,7 @@ def signed_headers(private_key, key_id, method, path):
         "X-STX-ACCESS-KEY": key_id,
         "X-STX-ACCESS-TIMESTAMP": timestamp,
         "X-STX-ACCESS-SIGNATURE": signature,
+        "User-Agent": USER_AGENT,
     }
 
 

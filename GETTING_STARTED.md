@@ -441,6 +441,24 @@ The WebSocket handshake signs the same way, with one difference: the method is
 `GET` and the path is `/socket/websocket` with **any query string dropped**, even
 though `?vsn=2.0.0` is on the URL.
 
+### Identify your client
+
+Send a `User-Agent` naming your software, on REST calls and on the WebSocket
+handshake:
+
+```
+<product>/<version> (<runtime>)
+```
+
+These examples send `stx-api-examples/1.0 (python/3.13.7)`, built in one place
+per language (`USER_AGENT` in `python/stx.py` and `javascript/stx.mjs`), so every
+request carries it. Change the product name to your own.
+
+**It is not required.** A request with no `User-Agent` is accepted. It is
+recorded against your API key, though, so a recognisable string is what lets
+support find your calls when you report a problem, rather than picking your
+traffic out of every default `python-requests/2.x` in the logs.
+
 ### Prices
 
 REST `/api/v1` sends **money as a fixed-point decimal string, in dollars**, and

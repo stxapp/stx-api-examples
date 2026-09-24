@@ -220,12 +220,13 @@ def cmd_positions(config, private_key, args):
 
     # position is a signed quantity string: positive is long, negative short.
     # A "0.00" row is a market you traded flat that has not settled yet.
-    # Money fields are dollar strings; open_risk is what the app shows as Risk.
-    print(f"{'MARKET':<38} {'POSITION':>9} {'PREMIUM':>9} {'OPEN RISK':>10} {'P&L':>9}")
+    # Money fields are signed dollar strings ("-0.8000" is a premium you paid)
+    # and print as they arrive; open_risk is what the app shows as Risk.
+    print(f"{'MARKET':<38} {'POSITION':>9} {'PREMIUM':>10} {'OPEN RISK':>10} {'P&L':>10}")
     for p in positions:
         print(
-            f"{p['market_id']:<38} {p['position']:>9} {stx.fmt_money(p['premium']):>9} "
-            f"{stx.fmt_money(p['open_risk']):>10} {stx.fmt_money(p['gross_pnl']):>9}"
+            f"{p['market_id']:<38} {p['position']:>9} {p['premium']:>10} "
+            f"{p['open_risk']:>10} {p['gross_pnl']:>10}"
         )
 
 
@@ -260,7 +261,7 @@ def cmd_fills(config, private_key, args):
     for fill in fills:
         print(
             f"{fill['trade_id']:<38} {fill['action']:<5} {fill['filled']:>7} "
-            f"{stx.fmt_money(fill['price'], 4):>8} {stx.fmt_money(fill['total_fee'], 4):>8}  "
+            f"{fill['price']:>8} {fill['total_fee']:>8}  "
             f"{fill['liquidity_action']}"
         )
 

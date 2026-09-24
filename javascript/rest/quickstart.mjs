@@ -217,14 +217,15 @@ async function cmdPositions(config, args) {
 
   // position is a signed quantity string: positive is long, negative short.
   // A "0.00" row is a market you traded flat that has not settled yet.
-  // Money fields are dollar strings; open_risk is what the app shows as Risk.
+  // Money fields are signed dollar strings ("-0.8000" is a premium you paid)
+  // and print as they arrive; open_risk is what the app shows as Risk.
   console.log(
-    `${"MARKET".padEnd(38)} ${"POSITION".padStart(9)} ${"PREMIUM".padStart(9)} ${"OPEN RISK".padStart(10)} ${"P&L".padStart(9)}`
+    `${"MARKET".padEnd(38)} ${"POSITION".padStart(9)} ${"PREMIUM".padStart(10)} ${"OPEN RISK".padStart(10)} ${"P&L".padStart(10)}`
   );
   for (const p of positions) {
     console.log(
-      `${p.market_id.padEnd(38)} ${p.position.padStart(9)} ${fmtMoney(p.premium).padStart(9)} ` +
-        `${fmtMoney(p.open_risk).padStart(10)} ${fmtMoney(p.gross_pnl).padStart(9)}`
+      `${p.market_id.padEnd(38)} ${p.position.padStart(9)} ${p.premium.padStart(10)} ` +
+        `${p.open_risk.padStart(10)} ${p.gross_pnl.padStart(10)}`
     );
   }
 }
@@ -264,7 +265,7 @@ async function cmdFills(config, args) {
   for (const fill of fills) {
     console.log(
       `${fill.trade_id.padEnd(38)} ${fill.action.padEnd(5)} ${fill.filled.padStart(7)} ` +
-        `${fmtMoney(fill.price, 4).padStart(8)} ${fmtMoney(fill.total_fee, 4).padStart(8)}  ${fill.liquidity_action}`
+        `${fill.price.padStart(8)} ${fill.total_fee.padStart(8)}  ${fill.liquidity_action}`
     );
   }
 }

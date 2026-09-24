@@ -3,6 +3,8 @@
 //   node javascript/rest/quickstart.mjs me           # who this key belongs to
 //   node javascript/rest/quickstart.mjs markets      # markets with a resting book
 //   node javascript/rest/quickstart.mjs orders       # your open orders
+//   node javascript/rest/quickstart.mjs positions    # your open positions (--market-ids to narrow)
+//   node javascript/rest/quickstart.mjs fills --order-id <id>   # what one order filled at
 //   node javascript/rest/quickstart.mjs roundtrip    # place a resting order, then cancel it
 //
 // Add --profile <name> to use a profile other than [default]:
@@ -188,6 +190,85 @@ async function cmdOrders(config) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Positions and fills
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/v1/positions - your open positions, as of now.
+ *
+ * This is a snapshot. The positions:<user_id> WebSocket channel is the live
+ * feed and sends this exact list as `all_positions` when you join, then
+ * `updated_positions` deltas. Use REST to seed or reconcile, the channel to
+ * stay current. The list is not paginated, so there is no cursor.
+ *
+ * --market-ids narrows it to a comma-separated list of market ids. An id you
+ * hold nothing in just matches nothing.
+ */
+async function cmdPositions(config, args) {
+  let path = "/api/v1/positions";
+  if (typeof args["market-ids"] === "string") path += `?market_ids=${args["market-ids"]}`;
+
+  const { positions } = await request(config, "GET", path);
+  if (positions.length === 0) {
+    console.log("No open positions.");
+    return;
+  }
+
+  // position is a signed quantity string: positive is long, negative short.
+  // A "0.00" row is a market you traded flat that has not settled yet.
+  // Money fields are dollar strings; open_risk is what the app shows as Risk.
+  console.log(
+    `${"MARKET".padEnd(38)} ${"POSITION".padStart(9)} ${"PREMIUM".padStart(9)} ${"OPEN RISK".padStart(10)} ${"P&L".padStart(9)}`
+  );
+  for (const p of positions) {
+    console.log(
+      `${p.market_id.padEnd(38)} ${p.position.padStart(9)} ${fmtMoney(p.premium).padStart(9)} ` +
+        `${fmtMoney(p.open_risk).padStart(10)} ${fmtMoney(p.gross_pnl).padStart(9)}`
+    );
+  }
+}
+
+/**
+ * GET /api/v1/fills?order_ids=... - the executions one order produced.
+ *
+ * One order can fill many times at different prices. order_ids takes a
+ * comma-separated list and combines with market_ids and status; all of them
+ * must match. Pages come back newest first with a cursor, as every list does.
+ * An order id that is not yours returns an empty list, not an error.
+ */
+async function cmdFills(config, args) {
+  const orderId = args["order-id"];
+  if (typeof orderId !== "string") fail("fills needs --order-id <uuid>. `orders` lists your open ones.");
+
+  const base = `/api/v1/fills?order_ids=${orderId}&limit=100`;
+  const fills = [];
+  let path = base;
+  for (;;) {
+    const page = await request(config, "GET", path);
+    fills.push(...page.fills);
+    if (!page.cursor) break;
+    // The cursor is opaque and goes back verbatim, and the signature covers it
+    // along with the rest of the query string.
+    path = `${base}&cursor=${encodeURIComponent(page.cursor)}`;
+  }
+
+  if (fills.length === 0) {
+    console.log("No fills for that order (yet).");
+    return;
+  }
+
+  console.log(
+    `${"TRADE".padEnd(38)} ${"SIDE".padEnd(5)} ${"QTY".padStart(7)} ${"PRICE".padStart(8)} ${"FEE".padStart(8)}  LIQUIDITY`
+  );
+  for (const fill of fills) {
+    console.log(
+      `${fill.trade_id.padEnd(38)} ${fill.action.padEnd(5)} ${fill.filled.padStart(7)} ` +
+        `${fmtMoney(fill.price, 4).padStart(8)} ${fmtMoney(fill.total_fee, 4).padStart(8)}  ${fill.liquidity_action}`
+    );
+  }
+}
+
 /**
  * Place a limit order well away from the touch, then cancel it.
  *
@@ -251,6 +332,8 @@ const COMMANDS = {
   me: cmdMe,
   markets: cmdMarkets,
   orders: cmdOrders,
+  positions: cmdPositions,
+  fills: cmdFills,
   roundtrip: cmdRoundtrip,
 };
 

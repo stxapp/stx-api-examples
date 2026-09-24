@@ -76,6 +76,10 @@ each step.
 [Read market data](./GETTING_STARTED.md#4-read-market-data) ·
 [Place and cancel an order](./GETTING_STARTED.md#5-place-and-cancel-an-order)
 
+**Leaderboard**: read the public boards and your own standing, and change your
+handle, avatar or listing.
+[Read the leaderboard](./GETTING_STARTED.md#4a-read-the-leaderboard)
+
 **WebSockets**: stream the book together with your own orders, fills, positions
 and balances on one authenticated socket, in the same dollar format as REST.
 [Watch it live](./GETTING_STARTED.md#6-watch-it-live) ·

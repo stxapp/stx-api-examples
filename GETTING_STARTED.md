@@ -194,6 +194,28 @@ that distinguishes sibling markets sits at the end, so `TOTAL43.5` and
 
 `me`, `orders` and `roundtrip` are the other subcommands.
 
+## 4a. Read the leaderboard
+
+```bash
+python python/rest/leaderboard.py board --metric volume --period weekly
+node javascript/rest/leaderboard.mjs board --metric volume --period weekly
+```
+
+The leaderboard ranks players by profit, volume and contracts settled over a
+period, per sport. Every row is public identity only (a handle and an avatar
+URL), never an account id. `categories` lists the sports with activity, `me`
+prints your own standing including a rank outside the top 100, and `profile`
+shows or changes your handle, avatar and whether you are listed at all:
+
+```bash
+python python/rest/leaderboard.py profile --opt-in false
+node javascript/rest/leaderboard.mjs profile --handle swift.fox12
+```
+
+A read_only key can read every board; changing the profile needs read_write.
+Where the operator has not switched the leaderboard on, every route answers
+`404 {"error": "Leaderboard is not enabled"}`.
+
 ## 5. Place and cancel an order
 
 Needs a `read_write` key. This places a real order, priced ten cents below the

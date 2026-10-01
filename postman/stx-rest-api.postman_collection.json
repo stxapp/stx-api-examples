@@ -77,6 +77,53 @@
             "description": "Returns {\"me\": {...}} - user_id, account_id, key_id, scope. This is the only place your user_id is published, and private WebSocket topics (orders:<user_id>) need it.\n\nSign this request before sending it. The signed message is timestamp_ms + METHOD + path, where path includes the query string exactly as sent. See postman/README.md for the one-liner that fills in {{timestamp}} and {{signature}}."
           },
           "response": []
+        },
+        {
+          "name": "Update your public profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/me/profile",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "me",
+                "profile"
+              ]
+            },
+            "description": "Change your `handle`, `avatar` or `leaderboard_opt_in`. Every key is optional but at least one must be sent. A key of the wrong JSON type is a 400. A handle that is taken, reserved, blocked, malformed or changed again inside the 30-day window is a 422 whose `error` names the rule. Returns the same object as `GET /api/v1/me`. A bearer session may always call this; an API key needs `read_write`.\n\nThis example only changes `leaderboard_opt_in`. Changing `handle` locks it for 30 days, so send one only when you mean it, for example `{\"handle\": \"swift.fox12\"}`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"leaderboard_opt_in\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
         }
       ],
       "description": "Who the key belongs to. `GET /me` is the only place your `user_id` is published, and the private WebSocket topics need it."
@@ -211,6 +258,53 @@
             "body": {
               "mode": "raw",
               "raw": "{\n  \"market_id\": \"{{market_id}}\",\n  \"order_type\": \"limit\",\n  \"action\": \"buy\",\n  \"price\": \"0.42\",\n  \"quantity\": \"5\",\n  \"client_order_id\": \"postman-1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Place several orders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/orders/batched",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "orders",
+                "batched"
+              ]
+            },
+            "description": "Places up to 100 orders (configurable) in one call. `orders` is a list, each entry shaped exactly like the single `POST /api/v1/orders` body. `batched` is a literal path segment. One geo check covers the batch; each leg is placed independently, so a rejected leg does not fail the others; the `results` array has one entry per order, in request order, each either `{order}` on success or `{errors}` on rejection. A malformed body (a bad field in any leg, empty, over the limit, or `orders` missing/not a list) is a 400 and places nothing. Requires a `read_write` key.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"orders\": [\n    {\n      \"market_id\": \"{{market_id}}\",\n      \"order_type\": \"limit\",\n      \"action\": \"buy\",\n      \"price\": \"0.41\",\n      \"quantity\": \"5\",\n      \"client_order_id\": \"postman-batch-1\"\n    },\n    {\n      \"market_id\": \"{{market_id}}\",\n      \"order_type\": \"limit\",\n      \"action\": \"buy\",\n      \"price\": \"0.40\",\n      \"quantity\": \"5\",\n      \"client_order_id\": \"postman-batch-2\"\n    }\n  ]\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -434,6 +528,81 @@
     {
       "name": "Positions and history",
       "item": [
+        {
+          "name": "List open positions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/positions",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "positions"
+              ],
+              "query": [
+                {
+                  "key": "market_ids",
+                  "value": "{{market_id}}",
+                  "description": "Comma-separated market UUIDs. Optional.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Your open positions as a point-in-time snapshot, largest `position` first. The body is identical to the `all_positions` frame the `positions:{user_id}` WebSocket channel sends on join, so a REST read can seed state that channel `updated_positions` deltas then keep current. This is a snapshot, not a feed: subscribe to the channel to hear about changes. Not paginated: the list is bounded by the markets you hold a live position in, and there is no `cursor`. A market you traded and closed out can appear with `position` `\"0.00\"` until it settles. Positions are not marked to market."
+          },
+          "response": []
+        },
+        {
+          "name": "Get account balance",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/account/balance",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "account",
+                "balance"
+              ]
+            },
+            "description": "Your balance and fee summary as a point-in-time snapshot, the same object the `balances:{user_id}` WebSocket channel publishes, so a REST read and a channel `update` delta are interchangeable. `available_balance` is rounded down to the cent and the three liabilities up, in both signs, so they need not reconcile to the cent; treat each as authoritative on its own."
+          },
+          "response": []
+        },
         {
           "name": "List fills",
           "request": {

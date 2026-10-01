@@ -192,7 +192,13 @@ The symbol is the whole string, and it is what `--market` takes later. The leg
 that distinguishes sibling markets sits at the end, so `TOTAL43.5` and
 `TOTAL46.5` differ only in their tail.
 
-`me`, `orders` and `roundtrip` are the other subcommands.
+`me`, `orders`, `positions`, `fills` and `roundtrip` are the other subcommands.
+
+`positions` reads `GET /api/v1/positions`, a snapshot of your open positions
+that matches what the `positions:<user_id>` channel sends when you join; add
+`--market-ids <id>,<id>` to narrow it. `fills --order-id <id>` reads
+`GET /api/v1/fills?order_ids=<id>`, every execution that one order produced,
+following the cursor to the last page.
 
 ## 5. Place and cancel an order
 

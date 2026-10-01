@@ -4,6 +4,8 @@
     python python/rest/quickstart.py me           # who this key belongs to
     python python/rest/quickstart.py markets      # markets with a resting book
     python python/rest/quickstart.py orders       # your open orders
+    python python/rest/quickstart.py positions    # your open positions (--market-ids to narrow)
+    python python/rest/quickstart.py fills --order-id <id>   # what one order filled at
     python python/rest/quickstart.py roundtrip    # place a resting order, then cancel it
 
 Add ``--profile <name>`` to use a profile other than ``[default]``:
@@ -191,6 +193,79 @@ def cmd_orders(config, private_key, _args):
         )
 
 
+# ---------------------------------------------------------------------------
+# Positions and fills
+# ---------------------------------------------------------------------------
+
+
+def cmd_positions(config, private_key, args):
+    """GET /api/v1/positions - your open positions, as of now.
+
+    This is a snapshot. The positions:<user_id> WebSocket channel is the live
+    feed and sends this exact list as `all_positions` when you join, then
+    `updated_positions` deltas. Use REST to seed or reconcile, the channel to
+    stay current. The list is not paginated, so there is no cursor.
+
+    --market-ids narrows it to a comma-separated list of market ids. An id you
+    hold nothing in just matches nothing.
+    """
+    path = "/api/v1/positions"
+    if args.market_ids:
+        path += f"?market_ids={args.market_ids}"
+
+    positions = request(config, private_key, "GET", path)["positions"]
+    if not positions:
+        print("No open positions.")
+        return
+
+    # position is a signed quantity string: positive is long, negative short.
+    # A "0.00" row is a market you traded flat that has not settled yet.
+    # Money fields are signed dollar strings ("-0.8000" is a premium you paid)
+    # and print as they arrive; open_risk is what the app shows as Risk.
+    print(f"{'MARKET':<38} {'POSITION':>9} {'PREMIUM':>10} {'OPEN RISK':>10} {'P&L':>10}")
+    for p in positions:
+        print(
+            f"{p['market_id']:<38} {p['position']:>9} {p['premium']:>10} "
+            f"{p['open_risk']:>10} {p['gross_pnl']:>10}"
+        )
+
+
+def cmd_fills(config, private_key, args):
+    """GET /api/v1/fills?order_ids=... - the executions one order produced.
+
+    One order can fill many times at different prices. order_ids takes a
+    comma-separated list and combines with market_ids and status; all of them
+    must match. Pages come back newest first with a cursor, as every list does.
+    An order id that is not yours returns an empty list, not an error.
+    """
+    if not args.order_id:
+        sys.exit("fills needs --order-id <uuid>. `orders` lists your open ones.")
+
+    path = f"/api/v1/fills?order_ids={args.order_id}&limit=100"
+    fills = []
+    while True:
+        page = request(config, private_key, "GET", path)
+        fills.extend(page["fills"])
+        if not page["cursor"]:
+            break
+        # The cursor is opaque and goes back verbatim, and the signature covers
+        # it along with the rest of the query string.
+        path = (f"/api/v1/fills?order_ids={args.order_id}&limit=100"
+                f"&cursor={requests.utils.quote(page['cursor'], safe='')}")
+
+    if not fills:
+        print("No fills for that order (yet).")
+        return
+
+    print(f"{'TRADE':<38} {'SIDE':<5} {'QTY':>7} {'PRICE':>8} {'FEE':>8}  LIQUIDITY")
+    for fill in fills:
+        print(
+            f"{fill['trade_id']:<38} {fill['action']:<5} {fill['filled']:>7} "
+            f"{fill['price']:>8} {fill['total_fee']:>8}  "
+            f"{fill['liquidity_action']}"
+        )
+
+
 def cmd_roundtrip(config, private_key, args):
     """Place a limit order well away from the touch, then cancel it.
 
@@ -256,6 +331,8 @@ COMMANDS = {
     "me": cmd_me,
     "markets": cmd_markets,
     "orders": cmd_orders,
+    "positions": cmd_positions,
+    "fills": cmd_fills,
     "roundtrip": cmd_roundtrip,
 }
 
@@ -264,6 +341,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("command", nargs="?", default="me", choices=sorted(COMMANDS))
     parser.add_argument("--profile", help="profile in ~/.stx/credentials")
+    parser.add_argument("--market-ids", help="`positions`: comma-separated market ids to narrow to")
+    parser.add_argument("--order-id", help="`fills`: the order whose fills to list")
     parser.add_argument("--force-production", action="store_true",
                         help="allow `roundtrip` to place a real order on a production profile")
     args = parser.parse_args()

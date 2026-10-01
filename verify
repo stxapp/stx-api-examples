@@ -34,7 +34,7 @@ base_url() {
     case "$1/$2" in
         us/demo)      echo "https://demo.stxapp.io" ;;
         ontario/demo) echo "https://demo.stxapp.ca" ;;
-        ontario/prod) echo "https://stxapp.ca" ;;
+        ontario/prod) echo "https://api.on.stxapp.ca" ;;
         *)
             echo "No host for region '$1' env '$2' in profile [$PROFILE]." >&2
             echo "Known: us/demo, ontario/demo, ontario/prod." >&2

@@ -114,7 +114,7 @@ per language:
 | --- | --- | --- |
 | `us` | `demo` | `demo.stxapp.io` |
 | `ontario` | `demo` | `demo.stxapp.ca` |
-| `ontario` | `prod` | `stxapp.ca` (real money) |
+| `ontario` | `prod` | `api.on.stxapp.ca` (real money) |
 
 US production is not open to API keys yet. A region or env not in the table is
 an error rather than a silent fallback; for any other host, see

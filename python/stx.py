@@ -35,7 +35,7 @@ from cryptography.hazmat.primitives import serialization
 BASE_URLS = {
     ("us", "demo"): "https://demo.stxapp.io",
     ("ontario", "demo"): "https://demo.stxapp.ca",
-    ("ontario", "prod"): "https://stxapp.ca",
+    ("ontario", "prod"): "https://api.on.stxapp.ca",
 }
 
 # A host not in that table - a local server, a review app - is set with

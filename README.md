@@ -55,7 +55,7 @@ key_file = ~/.stx/ontario-prod.pem
 | --- | --- | --- |
 | `us` | `demo` | `demo.stxapp.io` |
 | `ontario` | `demo` | `demo.stxapp.ca` |
-| `ontario` | `prod` | `stxapp.ca` (real money) |
+| `ontario` | `prod` | `api.on.stxapp.ca` (real money) |
 
 US production is not open yet. `./configure` and `./verify` take the profile name
 as an argument (`./verify ontario-demo`); the Python and JavaScript scripts take

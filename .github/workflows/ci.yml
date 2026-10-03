@@ -1,0 +1,74 @@
+name: CI
+
+# Offline checks: every example compiles on every supported runtime, the shell
+# scripts parse, and the Postman collection still builds into the run the Live
+# workflow makes. No API key, no calls to an exchange.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+    name: python ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+      - name: Compile every script
+        run: |
+          # shellcheck disable=SC2046
+          python -m py_compile $(git ls-files '*.py')
+      - name: Install python/requirements.txt
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r python/requirements.txt
+
+  javascript:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22, 24]
+    name: node ${{ matrix.node }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: javascript/package-lock.json
+      - name: Syntax-check every script
+        run: git ls-files '*.mjs' '*.js' | xargs -n1 node --check
+      - name: npm ci
+        working-directory: javascript
+        run: npm ci
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Shell scripts parse
+        run: |
+          for script in verify configure install.sh docs/demo-shell.sh; do
+            sh -n "$script"
+          done
+      - name: Postman collection builds into the Live run
+        # Fails if a request was added to or renamed in the collection without
+        # deciding whether the Live run sends it.
+        run: node .github/scripts/postman-ci.mjs "$RUNNER_TEMP/ci.postman_collection.json"

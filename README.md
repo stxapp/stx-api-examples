@@ -1,5 +1,7 @@
 # STX API examples
 
+[![Live](https://github.com/stxapp/stx-api-examples/actions/workflows/live.yml/badge.svg)](https://github.com/stxapp/stx-api-examples/actions/workflows/live.yml) [![CI](https://github.com/stxapp/stx-api-examples/actions/workflows/ci.yml/badge.svg)](https://github.com/stxapp/stx-api-examples/actions/workflows/ci.yml)
+
 Runnable examples for the [STX](https://stxapp.io) exchange API, organised by
 language and then by surface: request signing, market data, order placement,
 live order books over WebSocket, and a latency measurement you can run against

@@ -538,11 +538,13 @@ is the string `"0.610.1"` and nothing warns you.
 
 #### The ceiling
 
-A market's price ceiling is its own **`max_price`**, not a fixed 99c. Markets
-settle at $1, so `max_price` is `"1.0000"` and quotes run $0.01-$0.99. Read it
-off the market.
+A market's price ceiling is its own **`max_price`**, not a fixed 99c. Most
+markets settle at $1, so `max_price` is `"1.0000"` and quotes run $0.01-$0.99,
+but older markets can have a different ceiling, such as `"100.0000"`. Always
+read it off the market.
 
-A price at or above the cap is a `422 The order's price must be lower than 1.00`.
+A price at or above the cap is a `422`, for example
+`The order's price must be lower than 1.00`.
 
 #### The WebSocket topics use the same format
 

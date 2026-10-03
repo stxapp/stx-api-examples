@@ -1,0 +1,169 @@
+name: Live
+
+# Runs the examples against the public demo exchanges, set up the way the
+# README tells a customer to: ./install.sh, a profile for ./verify, and
+# STX_REGION / STX_ENV / STX_KEY_ID / STX_KEY_FILE for the Python and
+# JavaScript scripts.
+#
+# Orders: each quickstart `roundtrip` places one 1-contract buy ten cents under
+# the best bid and cancels it, and the Postman run places one 1 @ $0.01 buy,
+# reads it back and cancels it. The last step checks none of those is still
+# open, and cancels any that is.
+#
+# Needs these repository secrets (read_write API keys, the PEM as text):
+#   US_DEMO_API_KEY_ID, US_DEMO_API_KEY_PEM            (region us, env demo)
+#   ONTARIO_DEMO_API_KEY_ID, ONTARIO_DEMO_API_KEY_PEM  (region ontario, env demo)
+#
+# Never runs on pull requests, so the secrets are not exposed to them.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: us-demo
+            prefix: US_DEMO
+            region: us
+            env: demo
+          - name: ontario-demo
+            prefix: ONTARIO_DEMO
+            region: ontario
+            env: demo
+    name: live (${{ matrix.name }})
+    env:
+      STX_REGION: ${{ matrix.region }}
+      STX_ENV: ${{ matrix.env }}
+      STX_KEY_ID: ${{ secrets[format('{0}_API_KEY_ID', matrix.prefix)] }}
+      # A path, not the key: the examples read the PEM from this file.
+      STX_KEY_FILE: ~/.stx/ci.pem
+      PY: python/.venv/bin/python
+    steps:
+      - name: Credentials
+        env:
+          KEY_PEM: ${{ secrets[format('{0}_API_KEY_PEM', matrix.prefix)] }}
+        run: |
+          if [ -z "$STX_KEY_ID" ] || [ -z "$KEY_PEM" ]; then
+            echo "::error::Secrets ${{ matrix.prefix }}_API_KEY_ID and ${{ matrix.prefix }}_API_KEY_PEM must be set to run the examples on ${{ matrix.name }}."
+            exit 1
+          fi
+          # What ./configure writes, without its prompts.
+          umask 077
+          mkdir -p ~/.stx
+          printf '%s\n' "$KEY_PEM" > ~/.stx/ci.pem
+          printf '[ci]\nregion   = %s\nenv      = %s\nkey_id   = %s\nkey_file = %s\n' \
+            "$STX_REGION" "$STX_ENV" "$STX_KEY_ID" "$HOME/.stx/ci.pem" > ~/.stx/credentials
+          # Ids of the orders this run places, for the last step.
+          echo "PLACED=$RUNNER_TEMP/placed-orders.txt" >> "$GITHUB_ENV"
+          : > "$RUNNER_TEMP/placed-orders.txt"
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: ./install.sh
+        run: ./install.sh
+
+      - name: ./verify ci
+        run: |
+          ./verify ci | tee verify.log
+          grep -q '^OK' verify.log || { echo "::error::verify did not sign GET /api/v1/me on ${{ matrix.name }}"; exit 1; }
+          grep -q 'scope     read_write' verify.log || { echo "::error::the ${{ matrix.name }} key is not read_write"; exit 1; }
+
+      - name: python quickstart.py markets
+        run: |
+          "$PY" python/rest/quickstart.py markets | tee markets-py.log
+          grep -q ' tradeable of ' markets-py.log || { echo "::error::markets printed no summary on ${{ matrix.name }}"; exit 1; }
+
+      - name: python quickstart.py roundtrip
+        run: |
+          "$PY" python/rest/quickstart.py roundtrip | tee roundtrip-py.log
+          awk '/^placed /{print $2}' roundtrip-py.log >> "$PLACED"
+          grep -q '^placed .* status=accepted' roundtrip-py.log || { echo "::error::roundtrip placed no order on ${{ matrix.name }}"; exit 1; }
+          grep -q '^cancelled  status=cancelled' roundtrip-py.log || { echo "::error::roundtrip did not cancel its order on ${{ matrix.name }}"; exit 1; }
+
+      - name: node quickstart.mjs markets
+        run: |
+          node javascript/rest/quickstart.mjs markets | tee markets-js.log
+          grep -q ' tradeable of ' markets-js.log || { echo "::error::markets printed no summary on ${{ matrix.name }}"; exit 1; }
+
+      - name: node quickstart.mjs roundtrip
+        run: |
+          node javascript/rest/quickstart.mjs roundtrip | tee roundtrip-js.log
+          awk '/^placed /{print $2}' roundtrip-js.log >> "$PLACED"
+          grep -q '^placed .* status=accepted' roundtrip-js.log || { echo "::error::roundtrip placed no order on ${{ matrix.name }}"; exit 1; }
+          grep -q '^cancelled  status=cancelled' roundtrip-js.log || { echo "::error::roundtrip did not cancel its order on ${{ matrix.name }}"; exit 1; }
+
+      # The watchers run until interrupted, so each gets 20 seconds and a
+      # SIGINT, which they handle by printing "stopped" and exiting 0.
+      - name: python watch.py (20s)
+        run: |
+          timeout --preserve-status -k 10 -s INT 20 "$PY" -u python/websockets/watch.py | tee watch-py.log
+          grep -q 'JOIN      BOOK ok' watch-py.log || { echo "::error::watch.py did not join orderbook on ${{ matrix.name }}"; exit 1; }
+          grep -qE '^[0-9:]{8}  BOOK ' watch-py.log || { echo "::error::watch.py received no book snapshot on ${{ matrix.name }}"; exit 1; }
+          grep -q 'ORDER     all_orders: ' watch-py.log || { echo "::error::watch.py received no orders snapshot on ${{ matrix.name }}"; exit 1; }
+          grep -q 'WALLET    balances' watch-py.log || { echo "::error::watch.py received no balances on ${{ matrix.name }}"; exit 1; }
+          grep -q '^stopped' watch-py.log || { echo "::error::watch.py did not stop cleanly on ${{ matrix.name }}"; exit 1; }
+
+      - name: node watch.mjs (20s)
+        run: |
+          timeout --preserve-status -k 10 -s INT 20 node javascript/websockets/watch.mjs | tee watch-js.log
+          grep -q '^joined orderbook for ' watch-js.log || { echo "::error::watch.mjs did not join orderbook on ${{ matrix.name }}"; exit 1; }
+          grep -qE '^[0-9:]{8}  BOOK ' watch-js.log || { echo "::error::watch.mjs received no book snapshot on ${{ matrix.name }}"; exit 1; }
+          grep -q 'ORDER     all_orders: ' watch-js.log || { echo "::error::watch.mjs received no orders snapshot on ${{ matrix.name }}"; exit 1; }
+          grep -q 'WALLET    balances' watch-js.log || { echo "::error::watch.mjs received no balances on ${{ matrix.name }}"; exit 1; }
+          grep -q '^stopped' watch-js.log || { echo "::error::watch.mjs did not stop cleanly on ${{ matrix.name }}"; exit 1; }
+
+      - name: newman (Postman collection)
+        run: |
+          node .github/scripts/postman-ci.mjs "$RUNNER_TEMP/ci.postman_collection.json"
+          case "$STX_REGION/$STX_ENV" in
+            us/demo)      base_url=https://demo.stxapp.io ;;
+            ontario/demo) base_url=https://demo.stxapp.ca ;;
+            *) echo "::error::no Postman base_url for $STX_REGION/$STX_ENV"; exit 1 ;;
+          esac
+          # A Postman environment, as postman/README.md sets one up.
+          umask 077
+          jq -n --arg base_url "$base_url" --arg key_id "$STX_KEY_ID" --rawfile pem ~/.stx/ci.pem '
+            {name: "ci", values: [
+              {key: "base_url", value: $base_url, enabled: true},
+              {key: "key_id", value: $key_id, enabled: true},
+              {key: "stx_private_key", value: $pem, enabled: true}]}' > "$RUNNER_TEMP/ci.postman_environment.json"
+          status=0
+          npx --yes newman@6.2.2 run "$RUNNER_TEMP/ci.postman_collection.json" \
+            -e "$RUNNER_TEMP/ci.postman_environment.json" \
+            --export-environment "$RUNNER_TEMP/ci.postman_environment.json" || status=$?
+          # The order id the run saved, so the last step can check it is not open.
+          jq -r '.values[] | select(.key == "order_id" and .value != "") | .value' "$RUNNER_TEMP/ci.postman_environment.json" >> "$PLACED" || true
+          exit "$status"
+
+      - name: No order left open
+        if: always()
+        run: |
+          [ -s ~/.stx/ci.pem ] || exit 0
+          # shellcheck disable=SC2046
+          node .github/scripts/open-orders.mjs $(cat "$PLACED")

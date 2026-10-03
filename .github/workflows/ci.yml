@@ -68,6 +68,7 @@ jobs:
           for script in verify configure install.sh docs/demo-shell.sh; do
             sh -n "$script"
           done
+          bash -n .github/scripts/watched-roundtrip.sh
       - name: Postman collection builds into the Live run
         # Fails if a request was added to or renamed in the collection without
         # deciding whether the Live run sends it.

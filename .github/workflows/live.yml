@@ -6,8 +6,9 @@ name: Live
 # JavaScript scripts.
 #
 # Orders: each quickstart `roundtrip` places one 1-contract buy ten cents under
-# the best bid and cancels it, and the Postman run places one 1 @ $0.01 buy,
-# reads it back and cancels it. The last step checks none of those is still
+# the best bid and cancels it while the matching socket watcher (watch.py,
+# watch.mjs) looks on, and the Postman run places one 1 @ $0.01 buy, reads it
+# back and cancels it. The last step checks none of those is still
 # open, and cancels any that is.
 #
 # Needs these repository secrets (read_write API keys, the PEM as text):
@@ -99,44 +100,18 @@ jobs:
           "$PY" python/rest/quickstart.py markets | tee markets-py.log
           grep -q ' tradeable of ' markets-py.log || { echo "::error::markets printed no summary on ${{ matrix.name }}"; exit 1; }
 
-      - name: python quickstart.py roundtrip
-        run: |
-          "$PY" python/rest/quickstart.py roundtrip | tee roundtrip-py.log
-          awk '/^placed /{print $2}' roundtrip-py.log >> "$PLACED"
-          grep -q '^placed .* status=accepted' roundtrip-py.log || { echo "::error::roundtrip placed no order on ${{ matrix.name }}"; exit 1; }
-          grep -q '^cancelled  status=cancelled' roundtrip-py.log || { echo "::error::roundtrip did not cancel its order on ${{ matrix.name }}"; exit 1; }
-
       - name: node quickstart.mjs markets
         run: |
           node javascript/rest/quickstart.mjs markets | tee markets-js.log
           grep -q ' tradeable of ' markets-js.log || { echo "::error::markets printed no summary on ${{ matrix.name }}"; exit 1; }
 
-      - name: node quickstart.mjs roundtrip
-        run: |
-          node javascript/rest/quickstart.mjs roundtrip | tee roundtrip-js.log
-          awk '/^placed /{print $2}' roundtrip-js.log >> "$PLACED"
-          grep -q '^placed .* status=accepted' roundtrip-js.log || { echo "::error::roundtrip placed no order on ${{ matrix.name }}"; exit 1; }
-          grep -q '^cancelled  status=cancelled' roundtrip-js.log || { echo "::error::roundtrip did not cancel its order on ${{ matrix.name }}"; exit 1; }
+      # Each round trip runs while the socket watcher is joined to the same
+      # market, and the watcher has to see the order open and cancelled.
+      - name: python quickstart.py roundtrip, watched by watch.py
+        run: .github/scripts/watched-roundtrip.sh py ${{ matrix.name }}
 
-      # The watchers run until interrupted, so each gets 20 seconds and a
-      # SIGINT, which they handle by printing "stopped" and exiting 0.
-      - name: python watch.py (20s)
-        run: |
-          timeout --preserve-status -k 10 -s INT 20 "$PY" -u python/websockets/watch.py | tee watch-py.log
-          grep -q 'JOIN      BOOK ok' watch-py.log || { echo "::error::watch.py did not join orderbook on ${{ matrix.name }}"; exit 1; }
-          grep -qE '^[0-9:]{8}  BOOK ' watch-py.log || { echo "::error::watch.py received no book snapshot on ${{ matrix.name }}"; exit 1; }
-          grep -q 'ORDER     all_orders: ' watch-py.log || { echo "::error::watch.py received no orders snapshot on ${{ matrix.name }}"; exit 1; }
-          grep -q 'WALLET    balances' watch-py.log || { echo "::error::watch.py received no balances on ${{ matrix.name }}"; exit 1; }
-          grep -q '^stopped' watch-py.log || { echo "::error::watch.py did not stop cleanly on ${{ matrix.name }}"; exit 1; }
-
-      - name: node watch.mjs (20s)
-        run: |
-          timeout --preserve-status -k 10 -s INT 20 node javascript/websockets/watch.mjs | tee watch-js.log
-          grep -q '^joined orderbook for ' watch-js.log || { echo "::error::watch.mjs did not join orderbook on ${{ matrix.name }}"; exit 1; }
-          grep -qE '^[0-9:]{8}  BOOK ' watch-js.log || { echo "::error::watch.mjs received no book snapshot on ${{ matrix.name }}"; exit 1; }
-          grep -q 'ORDER     all_orders: ' watch-js.log || { echo "::error::watch.mjs received no orders snapshot on ${{ matrix.name }}"; exit 1; }
-          grep -q 'WALLET    balances' watch-js.log || { echo "::error::watch.mjs received no balances on ${{ matrix.name }}"; exit 1; }
-          grep -q '^stopped' watch-js.log || { echo "::error::watch.mjs did not stop cleanly on ${{ matrix.name }}"; exit 1; }
+      - name: node quickstart.mjs roundtrip, watched by watch.mjs
+        run: .github/scripts/watched-roundtrip.sh js ${{ matrix.name }}
 
       - name: newman (Postman collection)
         run: |

@@ -200,6 +200,36 @@ that matches what the `positions:<user_id>` channel sends when you join; add
 `GET /api/v1/fills?order_ids=<id>`, every execution that one order produced,
 following the cursor to the last page.
 
+## 4a. Read the leaderboard
+
+```bash
+python python/rest/leaderboard.py board --metric volume --period weekly
+node javascript/rest/leaderboard.mjs board --metric profit --category basketball
+```
+
+The leaderboard ranks players over a period on one metric: `volume`, `profit`,
+`predictions`, `markets`, `win_rate`, `biggest_win`, `return` or `streak`.
+`--category` is `all` (the default) or a sport key such as `basketball`; sport
+keys are the sports a market has traded or settled in during the period. The
+scripts always send `metric` (default `volume`) and `limit` (default 10), because
+without `metric` the server picks the operator's opening board. A board the
+operator hides comes back empty with `shown: false`.
+
+Every row is public identity only (a handle and an avatar URL), never an account
+id. `me` prints your own standing on every board, including a rank outside the
+list, and `profile` shows or changes your handle, avatar and whether you are
+listed at all:
+
+```bash
+python python/rest/leaderboard.py me --period monthly
+python python/rest/leaderboard.py profile --opt-in false
+node javascript/rest/leaderboard.mjs profile --handle swift.fox12
+```
+
+A read_only key can read every board; changing the profile needs read_write.
+Where the operator has not switched the leaderboard on, every route answers
+`404 {"error": "Leaderboard is not enabled"}`.
+
 ## 5. Place and cancel an order
 
 Needs a `read_write` key. This places a real order, priced ten cents below the

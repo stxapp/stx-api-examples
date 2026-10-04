@@ -105,6 +105,18 @@ jobs:
           node javascript/rest/quickstart.mjs markets | tee markets-js.log
           grep -q ' tradeable of ' markets-js.log || { echo "::error::markets printed no summary on ${{ matrix.name }}"; exit 1; }
 
+      # Read-only: one board and the key's own standing. Only US demo runs the
+      # leaderboard; on Ontario demo its routes do not exist yet.
+      - name: leaderboard.py / leaderboard.mjs board and me
+        if: matrix.name == 'us-demo'
+        run: |
+          for run in "$PY python/rest/leaderboard.py" "node javascript/rest/leaderboard.mjs"; do
+            $run board | tee leaderboard-board.log
+            grep -q '^volume · weekly · all ' leaderboard-board.log || { echo "::error::$run board printed no board header on ${{ matrix.name }}"; exit 1; }
+            $run me | tee leaderboard-me.log
+            grep -q '^weekly · all   listed: ' leaderboard-me.log || { echo "::error::$run me printed no standing on ${{ matrix.name }}"; exit 1; }
+          done
+
       # Each round trip runs while the socket watcher is joined to the same
       # market, and the watcher has to see the order open and cancelled.
       - name: python quickstart.py roundtrip, watched by watch.py

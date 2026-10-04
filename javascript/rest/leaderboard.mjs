@@ -1,14 +1,27 @@
-// STX leaderboard - read the public boards, your own standing, and edit your public profile.
+// STX leaderboard - read one board, your own standing, and edit your public profile.
 //
-//   node javascript/rest/leaderboard.mjs board                        # weekly profit, all categories
-//   node javascript/rest/leaderboard.mjs board --metric volume --period all
-//   node javascript/rest/leaderboard.mjs board --category basketball --limit 10
-//   node javascript/rest/leaderboard.mjs categories                   # sports with activity
-//   node javascript/rest/leaderboard.mjs me                           # your ranks and win rate
+//   node javascript/rest/leaderboard.mjs board                        # weekly volume, all sports, top 10
+//   node javascript/rest/leaderboard.mjs board --metric profit --period all
+//   node javascript/rest/leaderboard.mjs board --category basketball --limit 25
+//   node javascript/rest/leaderboard.mjs me                           # your rank on every board
+//   node javascript/rest/leaderboard.mjs me --category basketball --period monthly
 //   node javascript/rest/leaderboard.mjs profile                      # your handle, avatar, opt-in
 //   node javascript/rest/leaderboard.mjs profile --handle swift.fox12
 //   node javascript/rest/leaderboard.mjs profile --opt-in false       # leave the leaderboard
 //   node javascript/rest/leaderboard.mjs profile --reroll-avatar
+//
+// Two leaderboard endpoints: GET /api/v1/leaderboard (one board) and
+// GET /api/v1/leaderboard/me (your standing). `profile` uses GET /api/v1/me and
+// PATCH /api/v1/me/profile.
+//
+// --category is `all` (every sport) or one sport key, the lowercase sport name as
+// in a row's `top_sport`. Sport keys are the sports a market has traded or
+// settled in during the period; any other key is simply an empty board.
+//
+// --metric and --limit are always sent. Leave `metric` off and the server picks
+// the operator's opening board, which a client cannot look up. `limit` is
+// clamped to the operator's players per board (at most 100). A board the
+// operator hides answers with `shown: false` and no rows.
 //
 // Every row on a board is public identity only: a handle, an avatar URL and the
 // ranked value. No account ids, names or balances are ever returned.
@@ -21,7 +34,11 @@
 import { loadProfile, signedHeaders, parseArgs, fail, fmtMoney, unreachable } from "../stx.mjs";
 
 const PERIODS = ["daily", "weekly", "monthly", "yearly", "all"];
-const METRICS = ["profit", "volume", "predictions"];
+// How each board writes `value`: a dollar string, an integer, or a 0-1 ratio.
+const MONEY = ["volume", "profit", "biggest_win"];
+const COUNTS = ["predictions", "markets", "streak"];
+const RATIOS = ["win_rate", "return"];
+const METRICS = [...MONEY, ...COUNTS, ...RATIOS];
 const AVATAR_STYLES = ["dots", "rings", "stripes", "grid", "ball", "court", "stitch", "target", "candles", "dice"];
 const AVATAR_PALETTES = ["ember", "forest", "ocean", "grape", "slate", "mint", "rose", "gold"];
 
@@ -43,36 +60,37 @@ async function request(config, method, path, body) {
   return JSON.parse(text);
 }
 
-// Profit and volume are dollar strings; predictions is a plain count.
+// Money boards are dollar strings, counts are integers, ratios are 0-1 numbers.
 function fmtValue(metric, value) {
   if (value === null || value === undefined) return "-";
-  return metric === "predictions" ? Number(value).toLocaleString("en-US") : fmtMoney(value, 0);
+  if (COUNTS.includes(metric)) return Number(value).toLocaleString("en-US");
+  if (RATIOS.includes(metric)) return `${(value * 100).toFixed(1)}%`;
+  return fmtMoney(value);
 }
 
+// Top rows of one board. No cursor: a board is a fixed top list.
 async function cmdBoard(config, args) {
-  const path = `/api/v1/leaderboard?period=${args.period}&category=${args.category}&metric=${args.metric}&limit=${args.limit}`;
-  const board = await request(config, "GET", path);
-  console.log(`${args.metric} · ${args.period} · ${args.category}   (snapshot ${board.refreshed_at}, resets ${board.next_reset_at ?? "never"})`);
-  if (board.leaderboard.length === 0) console.log("  nobody is ranked here yet");
+  const query = new URLSearchParams({ period: args.period, category: args.category, metric: args.metric, limit: args.limit });
+  const board = await request(config, "GET", `/api/v1/leaderboard?${query}`);
+  console.log(`${board.metric} · ${board.period} · ${board.category}   (snapshot ${board.refreshed_at}, resets ${board.next_reset_at ?? "never"})`);
+  if (!board.shown) console.log("  this board is hidden by the operator on this deployment");
+  else if (board.leaderboard.length === 0) console.log("  nobody is ranked here yet");
   for (const row of board.leaderboard) {
-    console.log(`  ${String(row.rank).padStart(3)}  ${row.handle.padEnd(24)} ${fmtValue(args.metric, row.value).padStart(14)}   ${config.baseUrl}${row.avatar_url}`);
+    console.log(`  ${String(row.rank).padStart(3)}  ${row.handle.padEnd(24)} ${fmtValue(board.metric, row.value).padStart(14)}   ${(row.top_sport ?? "-").padEnd(12)} ${config.baseUrl}${row.avatar_url}`);
   }
 }
 
-async function cmdCategories(config) {
-  const { categories } = await request(config, "GET", "/api/v1/leaderboard/categories");
-  for (const c of categories) console.log(`  ${c.key.padEnd(16)} ${c.label}`);
-}
-
+// Your own standing on every board, including a rank outside the list.
 async function cmdMe(config, args) {
-  const me = await request(config, "GET", `/api/v1/leaderboard/me?period=${args.period}&category=${args.category}`);
-  console.log(`${args.period} · ${args.category}   listed: ${me.opted_in ? "yes" : "no"}`);
+  const query = new URLSearchParams({ period: args.period, category: args.category });
+  const me = await request(config, "GET", `/api/v1/leaderboard/me?${query}`);
+  console.log(`${me.period} · ${me.category}   listed: ${me.opted_in ? "yes" : "no"}`);
   for (const metric of METRICS) {
-    const stat = me[metric];
+    // Win rate is the one board whose rank sits under its own key.
+    const stat = me[metric === "win_rate" ? "win_rate_rank" : metric];
     console.log(`  ${metric.padEnd(12)} ${stat ? `#${stat.rank}  ${fmtValue(metric, stat.value)}` : "unranked"}`);
   }
-  const winRate = me.win_rate === null ? "-" : `${Math.round(me.win_rate * 100)}%`;
-  console.log(`  win rate     ${winRate}   settled markets ${me.settled_markets}`);
+  console.log(`  win rate     ${fmtValue("win_rate", me.win_rate)}   settled markets ${me.settled_markets}`);
 }
 
 async function cmdProfile(config, args) {
@@ -97,23 +115,25 @@ async function cmdProfile(config, args) {
   } else {
     ({ me } = await request(config, "GET", "/api/v1/me"));
   }
-  console.log(`  handle        ${me.handle}`);
-  console.log(`  avatar        ${config.baseUrl}${me.avatar_url}`);
+  // A player who has never opened the leaderboard has no handle or avatar yet.
+  console.log(`  handle        ${me.handle ?? "-"}`);
+  console.log(`  avatar        ${me.avatar_url ? config.baseUrl + me.avatar_url : "-"}`);
   console.log(`  listed        ${me.leaderboard_opt_in ? "yes" : "no"}`);
   console.log(`  handle change ${me.handle_changeable_at === null ? "allowed now" : "after " + me.handle_changeable_at}`);
 }
 
-const COMMANDS = { board: cmdBoard, categories: cmdCategories, me: cmdMe, profile: cmdProfile };
+const COMMANDS = { board: cmdBoard, me: cmdMe, profile: cmdProfile };
 
 const args = parseArgs();
 const command = args._?.[0] ?? "board";
 if (!COMMANDS[command]) fail(`unknown command ${command}; one of ${Object.keys(COMMANDS).join(", ")}`);
 args.period = args.period ?? "weekly";
 args.category = args.category ?? "all";
-args.metric = args.metric ?? "profit";
-args.limit = Number(args.limit ?? 25);
+args.metric = args.metric ?? "volume";
+args.limit = Number(args.limit ?? 10);
 if (!PERIODS.includes(args.period)) fail(`--period must be one of ${PERIODS.join(", ")}`);
 if (!METRICS.includes(args.metric)) fail(`--metric must be one of ${METRICS.join(", ")}`);
+if (!Number.isInteger(args.limit) || args.limit < 1 || args.limit > 100) fail("--limit must be 1 to 100");
 
 const config = loadProfile(args.profile);
 console.error(`[${config.profile} -> ${config.baseUrl}]\n`);

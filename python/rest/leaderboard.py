@@ -1,15 +1,28 @@
 #!/usr/bin/env python3
-"""STX leaderboard - read the public boards, your own standing, and edit your public profile.
+"""STX leaderboard - read one board, your own standing, and edit your public profile.
 
-    python python/rest/leaderboard.py board                       # weekly profit, all categories
-    python python/rest/leaderboard.py board --metric volume --period all
-    python python/rest/leaderboard.py board --category basketball --limit 10
-    python python/rest/leaderboard.py categories                  # sports with activity
-    python python/rest/leaderboard.py me                          # your ranks and win rate
+    python python/rest/leaderboard.py board                       # weekly volume, all sports, top 10
+    python python/rest/leaderboard.py board --metric profit --period all
+    python python/rest/leaderboard.py board --category basketball --limit 25
+    python python/rest/leaderboard.py me                          # your rank on every board
+    python python/rest/leaderboard.py me --category basketball --period monthly
     python python/rest/leaderboard.py profile                     # your handle, avatar, opt-in
     python python/rest/leaderboard.py profile --handle swift.fox12
     python python/rest/leaderboard.py profile --opt-in false      # leave the leaderboard
     python python/rest/leaderboard.py profile --reroll-avatar
+
+Two leaderboard endpoints: GET /api/v1/leaderboard (one board) and
+GET /api/v1/leaderboard/me (your standing). ``profile`` uses GET /api/v1/me and
+PATCH /api/v1/me/profile.
+
+``--category`` is ``all`` (every sport) or one sport key, the lowercase sport
+name as in a row's ``top_sport``. Sport keys are the sports a market has traded
+or settled in during the period; any other key is simply an empty board.
+
+``--metric`` and ``--limit`` are always sent. Leave ``metric`` off and the server
+picks the operator's opening board, which a client cannot look up. ``limit`` is
+clamped to the operator's players per board (at most 100). A board the operator
+hides answers with ``shown: false`` and no rows.
 
 Every row on a board is public identity only: a handle, an avatar URL and the
 ranked value. No account ids, names or balances are ever returned.
@@ -25,6 +38,8 @@ import argparse
 import os
 import random
 import sys
+from decimal import ROUND_HALF_UP, Decimal
+from urllib.parse import urlencode
 
 try:
     import requests
@@ -38,7 +53,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import stx  # noqa: E402
 
 PERIODS = ("daily", "weekly", "monthly", "yearly", "all")
-METRICS = ("profit", "volume", "predictions")
+# How each board writes `value`: a dollar string, an integer, or a 0-1 ratio.
+MONEY = ("volume", "profit", "biggest_win")
+COUNTS = ("predictions", "markets", "streak")
+RATIOS = ("win_rate", "return")
+METRICS = MONEY + COUNTS + RATIOS
 AVATAR_STYLES = ("dots", "rings", "stripes", "grid", "ball", "court", "stitch", "target", "candles", "dice")
 AVATAR_PALETTES = ("ember", "forest", "ocean", "grape", "slate", "mint", "rose", "gold")
 
@@ -61,50 +80,51 @@ def request(config, private_key, method, path, body=None):
 
 
 def fmt_value(metric, value):
-    """Profit and volume are dollar strings; predictions is a plain count."""
+    """Money boards are dollar strings, counts are integers, ratios are 0-1 numbers."""
     if value is None:
         return "-"
-    return f"{value:,}" if metric == "predictions" else stx.fmt_money(value, places=0)
+    if metric in COUNTS:
+        return f"{value:,}"
+    if metric in RATIOS:
+        # Half up, as JavaScript's toFixed does, so both examples print the same.
+        return f"{Decimal(str(value * 100)).quantize(Decimal('0.1'), ROUND_HALF_UP)}%"
+    return stx.fmt_money(value)
 
 
 # ---------------------------------------------------------------------------
-# Boards
+# Leaderboard
 # ---------------------------------------------------------------------------
 
 
 def cmd_board(config, private_key, args):
-    """Top rows of one board. No cursor: a board is a fixed top 100."""
-    path = (f"/api/v1/leaderboard?period={args.period}&category={args.category}"
-            f"&metric={args.metric}&limit={args.limit}")
-    board = request(config, private_key, "GET", path)
+    """Top rows of one board. No cursor: a board is a fixed top list."""
+    query = urlencode({"period": args.period, "category": args.category,
+                       "metric": args.metric, "limit": args.limit})
+    board = request(config, private_key, "GET", f"/api/v1/leaderboard?{query}")
 
-    print(f"{args.metric} · {args.period} · {args.category}   "
+    print(f"{board['metric']} · {board['period']} · {board['category']}   "
           f"(snapshot {board['refreshed_at']}, resets {board['next_reset_at'] or 'never'})")
-    if not board["leaderboard"]:
+    if not board["shown"]:
+        print("  this board is hidden by the operator on this deployment")
+    elif not board["leaderboard"]:
         print("  nobody is ranked here yet")
     for row in board["leaderboard"]:
-        print(f"  {row['rank']:>3}  {row['handle']:<24} {fmt_value(args.metric, row['value']):>14}"
-              f"   {config['base_url']}{row['avatar_url']}")
-
-
-def cmd_categories(config, private_key, _args):
-    """`all` plus every sport with activity in the current snapshot."""
-    for category in request(config, private_key, "GET", "/api/v1/leaderboard/categories")["categories"]:
-        print(f"  {category['key']:<16} {category['label']}")
+        print(f"  {row['rank']:>3}  {row['handle']:<24} {fmt_value(board['metric'], row['value']):>14}"
+              f"   {row.get('top_sport') or '-':<12} {config['base_url']}{row['avatar_url']}")
 
 
 def cmd_me(config, private_key, args):
-    """Your own standing, including a rank outside the top 100."""
-    path = f"/api/v1/leaderboard/me?period={args.period}&category={args.category}"
-    me = request(config, private_key, "GET", path)
+    """Your own standing on every board, including a rank outside the list."""
+    query = urlencode({"period": args.period, "category": args.category})
+    me = request(config, private_key, "GET", f"/api/v1/leaderboard/me?{query}")
 
-    print(f"{args.period} · {args.category}   listed: {'yes' if me['opted_in'] else 'no'}")
+    print(f"{me['period']} · {me['category']}   listed: {'yes' if me['opted_in'] else 'no'}")
     for metric in METRICS:
-        stat = me[metric]
+        # Win rate is the one board whose rank sits under its own key.
+        stat = me["win_rate_rank" if metric == "win_rate" else metric]
         line = f"#{stat['rank']}  {fmt_value(metric, stat['value'])}" if stat else "unranked"
         print(f"  {metric:<12} {line}")
-    win_rate = "-" if me["win_rate"] is None else f"{round(me['win_rate'] * 100)}%"
-    print(f"  win rate     {win_rate}   settled markets {me['settled_markets']}")
+    print(f"  win rate     {fmt_value('win_rate', me['win_rate'])}   settled markets {me['settled_markets']}")
 
 
 # ---------------------------------------------------------------------------
@@ -134,9 +154,11 @@ def cmd_profile(config, private_key, args):
     else:
         me = request(config, private_key, "GET", "/api/v1/me")["me"]
 
-    print(f"  handle       {me['handle']}")
-    print(f"  avatar       {config['base_url']}{me['avatar_url']}")
-    print(f"  listed       {'yes' if me['leaderboard_opt_in'] else 'no'}")
+    # A player who has never opened the leaderboard has no handle or avatar yet.
+    avatar = config["base_url"] + me["avatar_url"] if me["avatar_url"] else "-"
+    print(f"  handle        {me['handle'] or '-'}")
+    print(f"  avatar        {avatar}")
+    print(f"  listed        {'yes' if me['leaderboard_opt_in'] else 'no'}")
     print(f"  handle change {'allowed now' if me['handle_changeable_at'] is None else 'after ' + me['handle_changeable_at']}")
 
 
@@ -148,7 +170,14 @@ def parse_bool(value):
     raise argparse.ArgumentTypeError("expected true or false")
 
 
-COMMANDS = {"board": cmd_board, "categories": cmd_categories, "me": cmd_me, "profile": cmd_profile}
+def parse_limit(value):
+    limit = int(value)
+    if not 1 <= limit <= 100:
+        raise argparse.ArgumentTypeError("expected 1 to 100")
+    return limit
+
+
+COMMANDS = {"board": cmd_board, "me": cmd_me, "profile": cmd_profile}
 
 
 def main():
@@ -156,9 +185,10 @@ def main():
     parser.add_argument("command", nargs="?", default="board", choices=sorted(COMMANDS))
     parser.add_argument("--profile", help="profile in ~/.stx/credentials")
     parser.add_argument("--period", default="weekly", choices=PERIODS)
-    parser.add_argument("--category", default="all", help="all, or a key from `categories`")
-    parser.add_argument("--metric", default="profit", choices=METRICS)
-    parser.add_argument("--limit", type=int, default=25, help="rows, at most 100")
+    parser.add_argument("--category", default="all",
+                        help="all, or a sport key such as basketball: a sport a market has traded or settled in")
+    parser.add_argument("--metric", default="volume", choices=METRICS)
+    parser.add_argument("--limit", type=parse_limit, default=10, help="rows, 1 to 100")
     parser.add_argument("--handle", help="new public handle (3-24 chars, a-z 0-9 . _)")
     parser.add_argument("--opt-in", type=parse_bool, default=None, metavar="true|false",
                         help="show or hide yourself on the leaderboard")

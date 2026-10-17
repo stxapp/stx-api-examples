@@ -8,8 +8,10 @@ Both SDKs read the `~/.stx/credentials` file that `./configure` writes. Pick a p
 
 [`stx-python`](https://pypi.org/project/stx-python/), Python 3.9 or later.
 
+Give the SDK its own virtualenv, not `python/.venv`: the SDK's `stx` package would hide the `python/stx.py` helper the plain examples import.
+
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv sdk/python/.venv && source sdk/python/.venv/bin/activate
 pip install -r sdk/python/requirements.txt
 
 export STX_PROFILE=us-demo

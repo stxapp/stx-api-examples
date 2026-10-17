@@ -131,7 +131,25 @@ jobs:
           [ "$(grep -c '^cancelled .*status=cancelled' crypto-quote.log)" = 2 ] || { echo "::error::crypto.py quote did not place and cancel both sides on ${{ matrix.name }}"; exit 1; }
           exit "$status"
 
-      # Each round trip runs while the socket watcher is joined to the same
+      # The same crypto example written with each SDK. The SDKs read the [ci]
+      # profile the Credentials step wrote.
+      - name: sdk/python and sdk/typescript crypto windows and quote
+        if: matrix.name == 'us-demo'
+        env:
+          STX_PROFILE: ci
+        run: |
+          "$PY" -m pip install --quiet -r sdk/python/requirements.txt
+          (cd sdk/typescript && npm ci --silent)
+          for run in "$PY sdk/python/crypto.py" "npx --prefix sdk/typescript tsx sdk/typescript/crypto.ts"; do
+            $run windows | tee sdk-windows.log
+            grep -q ' open ' sdk-windows.log || { echo "::error::$run windows found no open window on ${{ matrix.name }}"; exit 1; }
+            status=0
+            $run quote | tee sdk-quote.log || status=$?
+            awk '$1 == "placed" { print $6 }' sdk-quote.log >> "$PLACED"
+            [ "$(grep -c '^cancelled .*status=cancelled' sdk-quote.log)" = 2 ] || { echo "::error::$run quote did not place and cancel both sides on ${{ matrix.name }}"; exit 1; }
+            [ "$status" = 0 ] || exit "$status"
+          done
+
       # market, and the watcher has to see the order open and cancelled.
       - name: python quickstart.py roundtrip, watched by watch.py
         run: .github/scripts/watched-roundtrip.sh py ${{ matrix.name }}

@@ -230,6 +230,21 @@ A read_only key can read every board; changing the profile needs read_write.
 Where the operator has not switched the leaderboard on, every route answers
 `404 {"error": "Leaderboard is not enabled"}`.
 
+## 4b. Trade the crypto windows
+
+US demo lists short Up/Down markets on BTC and ETH. Each window runs 15 minutes and has two markets: **Up** settles at $1 if the coin ends the window at or above its starting price, **Down** if it does not. The next window opens as the last one closes, so look the markets up again each window instead of holding on to a market id.
+
+```bash
+python python/rest/crypto.py windows                 # the open window and the next ones
+python python/rest/crypto.py book --coin btc --side up
+python python/rest/crypto.py quote --coin btc --side up --bid 0.45 --offer 0.55
+python python/rest/crypto.py results --coin eth      # how recent windows settled
+```
+
+Crypto markets are the sport `Crypto`, so `GET /api/v1/markets?sports=Crypto` returns only them. Add `status=open` for the window trading now, or `status=scheduled` for the ones after it. A market's `specifier` is the coin (`btc`, `eth`) and its `rules` is `crypto_up` or `crypto_down`; `question` and `description` give the reference price and the times.
+
+`quote` needs a `read_write` key. It places a limit buy at `--bid` and a limit sell at `--offer` on the current window, reads the book until both show, and cancels them; add `--keep` to leave them resting. A sell needs no position: it opens a short. An order that would trade against your own resting order is rejected with `rejection_reason: "match_with_self"`.
+
 ## 5. Place and cancel an order
 
 Needs a `read_write` key. This places a real order, priced ten cents below the

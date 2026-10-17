@@ -82,6 +82,8 @@ each step.
 handle, avatar or listing.
 [Read the leaderboard](./GETTING_STARTED.md#4a-read-the-leaderboard)
 
+**Crypto**: find the live 15-minute BTC and ETH Up/Down windows, read the book and quote both sides (US demo). [Trade the crypto windows](./GETTING_STARTED.md#4b-trade-the-crypto-windows)
+
 **WebSockets**: stream the book together with your own orders, fills, positions
 and balances on one authenticated socket, in the same dollar format as REST.
 [Watch it live](./GETTING_STARTED.md#6-watch-it-live) ·

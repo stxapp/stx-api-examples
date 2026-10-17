@@ -117,6 +117,20 @@ jobs:
             grep -q '^weekly · all   listed: ' leaderboard-me.log || { echo "::error::$run me printed no standing on ${{ matrix.name }}"; exit 1; }
           done
 
+      # Crypto windows are listed on US demo only. `quote` places a buy and a
+      # sell on the open BTC Up window and cancels both; their ids go to
+      # $PLACED for the last step.
+      - name: crypto.py windows and quote
+        if: matrix.name == 'us-demo'
+        run: |
+          "$PY" python/rest/crypto.py windows | tee crypto-windows.log
+          grep -q ' open ' crypto-windows.log || { echo "::error::crypto.py windows found no open window on ${{ matrix.name }}"; exit 1; }
+          status=0
+          "$PY" python/rest/crypto.py quote | tee crypto-quote.log || status=$?
+          awk '$1 == "placed" { print $6 }' crypto-quote.log >> "$PLACED"
+          [ "$(grep -c '^cancelled .*status=cancelled' crypto-quote.log)" = 2 ] || { echo "::error::crypto.py quote did not place and cancel both sides on ${{ matrix.name }}"; exit 1; }
+          exit "$status"
+
       # Each round trip runs while the socket watcher is joined to the same
       # market, and the watcher has to see the order open and cancelled.
       - name: python quickstart.py roundtrip, watched by watch.py

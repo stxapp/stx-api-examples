@@ -132,15 +132,17 @@ jobs:
           exit "$status"
 
       # The same crypto example written with each SDK. The SDKs read the [ci]
-      # profile the Credentials step wrote.
+      # profile the Credentials step wrote. stx-python gets its own venv: its
+      # `stx` package would shadow python/stx.py in python/.venv.
       - name: sdk/python and sdk/typescript crypto windows and quote
         if: matrix.name == 'us-demo'
         env:
           STX_PROFILE: ci
         run: |
-          "$PY" -m pip install --quiet -r sdk/python/requirements.txt
+          python -m venv sdk/python/.venv
+          sdk/python/.venv/bin/python -m pip install --quiet -r sdk/python/requirements.txt
           (cd sdk/typescript && npm ci --silent)
-          for run in "$PY sdk/python/crypto.py" "npx --prefix sdk/typescript tsx sdk/typescript/crypto.ts"; do
+          for run in "sdk/python/.venv/bin/python sdk/python/crypto.py" "npx --prefix sdk/typescript tsx sdk/typescript/crypto.ts"; do
             $run windows | tee sdk-windows.log
             grep -q ' open ' sdk-windows.log || { echo "::error::$run windows found no open window on ${{ matrix.name }}"; exit 1; }
             status=0

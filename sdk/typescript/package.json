@@ -1,0 +1,22 @@
+{
+  "name": "@stxapp/stx-api-examples-sdk-typescript",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TypeScript SDK examples for the STX exchange.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "crypto": "tsx crypto.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@stxapp/stx-typescript": "0.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.18.6",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

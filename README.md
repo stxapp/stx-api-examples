@@ -9,14 +9,17 @@ your own connection.
 
 **This is example code, not a client library.** It is deliberately plain and
 copyable: each script reads top to bottom and shows what goes on the wire. If
-you want a maintained client instead, use **`pysdk`**, the supported STX Python
-SDK; ask support for access.
+you want a maintained client instead, use an STX SDK:
+[`stx-python`](https://pypi.org/project/stx-python/) or
+[`@stxapp/stx-typescript`](https://www.npmjs.com/package/@stxapp/stx-typescript).
+[`sdk/`](./sdk/) has examples written with each.
 
 ```
 install.sh  configure  verify       setup and signing check - POSIX shell only
 python/     rest/  websockets/      signed REST, live channels, latency
 javascript/ rest/  websockets/
 postman/                            REST collection, one request per route
+sdk/        python/  typescript/    the same examples written with the STX SDKs
 ```
 
 ## Setup
@@ -82,7 +85,7 @@ each step.
 handle, avatar or listing.
 [Read the leaderboard](./GETTING_STARTED.md#4a-read-the-leaderboard)
 
-**Crypto**: find the live 15-minute BTC and ETH Up/Down windows, read the book and quote both sides (US demo). [Trade the crypto windows](./GETTING_STARTED.md#4b-trade-the-crypto-windows)
+**Crypto**: find the live 15-minute BTC and ETH Up/Down windows, read the book and quote both sides (US demo), in plain REST, the Python SDK or the TypeScript SDK. [Trade the crypto windows](./GETTING_STARTED.md#4b-trade-the-crypto-windows) · [With an SDK](./sdk/)
 
 **WebSockets**: stream the book together with your own orders, fills, positions
 and balances on one authenticated socket, in the same dollar format as REST.

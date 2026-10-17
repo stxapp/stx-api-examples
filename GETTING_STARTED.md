@@ -243,6 +243,8 @@ python python/rest/crypto.py results --coin eth      # how recent windows settle
 
 Crypto markets are the sport `Crypto`, so `GET /api/v1/markets?sports=Crypto` returns only them. Add `status=open` for the window trading now, or `status=scheduled` for the ones after it. A market's `specifier` is the coin (`btc`, `eth`) and its `rules` is `crypto_up` or `crypto_down`; `question` and `description` give the reference price and the times.
 
+The same commands, written with an STX SDK instead of raw requests, are in [`sdk/`](./sdk/): `python sdk/python/crypto.py` uses [`stx-python`](https://pypi.org/project/stx-python/) and `npx tsx crypto.ts` in `sdk/typescript` uses [`@stxapp/stx-typescript`](https://www.npmjs.com/package/@stxapp/stx-typescript). Both read the profile `./configure` wrote; pick it with `STX_PROFILE`.
+
 `quote` needs a `read_write` key. It places a limit buy at `--bid` and a limit sell at `--offer` on the current window, reads the book until both show, and cancels them; add `--keep` to leave them resting. A sell needs no position: it opens a short. An order that would trade against your own resting order is rejected with `rejection_reason: "match_with_self"`.
 
 ## 5. Place and cancel an order

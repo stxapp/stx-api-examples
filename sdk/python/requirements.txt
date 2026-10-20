@@ -1,2 +1,2 @@
 # The STX Python SDK, pinned so a run today and a run in six months behave the same.
-stx-python==0.7.0
+stx-python==0.7.1

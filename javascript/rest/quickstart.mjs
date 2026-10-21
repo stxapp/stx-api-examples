@@ -5,7 +5,7 @@
 //   node javascript/rest/quickstart.mjs orders       # your open orders
 //   node javascript/rest/quickstart.mjs positions    # your open positions (--market-ids to narrow)
 //   node javascript/rest/quickstart.mjs fills --order-id <id>   # what one order filled at
-//   node javascript/rest/quickstart.mjs roundtrip    # place a resting order, then cancel it
+//   node javascript/rest/quickstart.mjs roundtrip    # place a resting order, then cancel it (--market to choose)
 //
 // Add --profile <name> to use a profile other than [default]:
 //
@@ -299,7 +299,12 @@ async function cmdRoundtrip(config, args) {
     );
   }
 
-  const { market, price } = pickRestingPrice(tradeable(await listMarkets(config)));
+  let markets = tradeable(await listMarkets(config));
+  if (typeof args.market === "string") {
+    markets = markets.filter((m) => m.market_id === args.market || m.symbol === args.market);
+    if (markets.length === 0) fail(`Market ${args.market} is not open and tradeable right now.`);
+  }
+  const { market, price } = pickRestingPrice(markets);
   if (!market) fail("No tradeable market to place an order on.");
   // Parse before doing arithmetic. `"0.61" - 0.1` happens to work by coercion,
   // but `"0.61" + 0.1` is the string "0.610.1" and nothing warns you.

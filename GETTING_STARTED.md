@@ -282,15 +282,14 @@ Open a second terminal. The watcher streams the book and the market summary
 together with your own orders, fills, positions, settlements and balances, on one
 authenticated socket, using the dollar-format topics documented in
 [CHANNELS.md](./CHANNELS.md).
-Point it at the market `roundtrip` will use so you see both sides of the same
-book:
+Point both at the same market so you see both sides of the same book:
 
 ```bash
 # terminal 1
 python python/websockets/watch.py --market STXNCAAF-26SEP031900WESKENN-TOTAL46.5
 
 # terminal 2
-python python/rest/quickstart.py roundtrip
+python python/rest/quickstart.py roundtrip --market STXNCAAF-26SEP031900WESKENN-TOTAL46.5
 ```
 
 ![The watcher on the left, a place-and-cancel round trip on the right. The book

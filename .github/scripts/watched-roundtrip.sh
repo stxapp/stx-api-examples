@@ -26,7 +26,7 @@ market=$("$PY" docs/pick-market.py)
 # watcher runs in the foreground so the SIGINT from timeout reaches it.
 (
   for _ in $(seq 1 30); do grep -q "$joined" "watch-$lang.log" && break; sleep 0.5; done
-  "${roundtrip[@]}" > "roundtrip-$lang.log"
+  "${roundtrip[@]}" --market "$market" > "roundtrip-$lang.log"
 ) &
 roundtrip_pid=$!
 timeout --preserve-status -k 10 -s INT 25 "${watch[@]}" --market "$market" | tee "watch-$lang.log"

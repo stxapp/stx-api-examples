@@ -21,4 +21,7 @@ spec.loader.exec_module(quickstart)
 config = stx.load_profile(None)
 private_key = stx.load_private_key(config)
 markets = quickstart.tradeable_markets(quickstart.list_markets(config, private_key))
-print(next(m for m in markets if m.get("bids"))["symbol"])
+market, _price = quickstart.pick_resting_price(markets)
+if market is None:
+    sys.exit("No tradeable market to place an order on.")
+print(market["symbol"])

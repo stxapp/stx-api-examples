@@ -139,6 +139,31 @@ async function rest(method, path, body) {
   return response.json();
 }
 
+/**
+ * True when the market's event has not started yet.
+ *
+ * The list comes back soonest event first, and a demo exchange can leave a game
+ * that already started (or finished) open and `scheduled`, with nobody quoting
+ * it. Pick past those.
+ */
+function upcoming(market) {
+  if (!market.event_start || !["scheduled", null, undefined].includes(market.event_status)) return false;
+  return Date.parse(market.event_start) > Date.now();
+}
+
+/** Upcoming first, then a book with both a bid and an offer, then depth. */
+function bookRank(market) {
+  const bids = market.bids?.length ?? 0;
+  const offers = market.offers?.length ?? 0;
+  return [upcoming(market) ? 1 : 0, bids && offers ? 1 : 0, bids + offers];
+}
+
+/** Sorts best book first, by bookRank. */
+const byBookRank = (a, b) => {
+  const [ra, rb] = [bookRank(a), bookRank(b)];
+  return rb[0] - ra[0] || rb[1] - ra[1] || rb[2] - ra[2];
+};
+
 const { markets } = await rest("GET", "/api/v1/markets?status=open&limit=200");
 
 let market;
@@ -146,17 +171,12 @@ if (args.market) {
   market = markets.find((m) => m.market_id === args.market || m.symbol === args.market);
   if (!market) fail(`Market ${args.market} is not open and tradeable right now.`);
 } else {
-  const live = markets.filter((m) => m.trading && m.status === "open");
+  const live = markets.filter((m) => m.trading && m.status === "open").sort(byBookRank);
   // Best book first. A quiet demo can have no bids anywhere; then any market
   // without an offer at a cent will do, since the order rests at a cent.
-  const withBid = live.filter((m) => m.bids?.length > 0);
-  market = withBid.length
-    ? withBid.reduce((best, m) =>
-        m.bids.length + (m.offers?.length ?? 0) > best.bids.length + (best.offers?.length ?? 0)
-          ? m
-          : best
-      )
-    : live.find((m) => !(m.offers ?? []).some((o) => toNumber(o.price) <= 0.01));
+  market =
+    live.find((m) => m.bids?.length > 0) ??
+    live.find((m) => !(m.offers ?? []).some((o) => toNumber(o.price) <= 0.01));
   if (!market) fail("No tradeable market to place an order on.");
 }
 

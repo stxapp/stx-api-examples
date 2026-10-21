@@ -95,6 +95,19 @@ def request(config, private_key, method, path, body=None):
 # ---------------------------------------------------------------------------
 
 
+def sort_book(market):
+    """Put each side of the market's book best first, and return the market.
+
+    Do this yourself. On GET /api/v1/markets bids AND offers both run highest
+    price to lowest, so the raw `offers[0]` is the worst offer, not the best.
+    """
+    def price(level):
+        return stx.to_decimal(level["price"])
+    market["bids"] = sorted(market.get("bids") or [], key=price, reverse=True)
+    market["offers"] = sorted(market.get("offers") or [], key=price)
+    return market
+
+
 def crypto_markets(config, private_key, statuses, limit=100, newest_first=False):
     """Crypto markets in the given statuses, following the cursor to the end."""
     query = f"sports=Crypto&status={','.join(statuses)}&limit={limit}"
@@ -104,7 +117,7 @@ def crypto_markets(config, private_key, statuses, limit=100, newest_first=False)
     markets, path = [], f"/api/v1/markets?{query}"
     while True:
         page = request(config, private_key, "GET", path)
-        markets.extend(page["markets"])
+        markets.extend(sort_book(m) for m in page["markets"])
         # One page is enough when the caller only wants the newest few.
         if not page["cursor"] or newest_first:
             return markets
@@ -135,9 +148,19 @@ def window_of(market):
     return start, start + timedelta(minutes=minutes)
 
 
+def not_ended(market):
+    """False for a window whose end has already passed.
+
+    A demo exchange can still list an old window as open or scheduled after it
+    ended, with no book. Skip those rather than show or trade them.
+    """
+    return window_of(market)[1] > datetime.now(timezone.utc)
+
+
 def pick(markets, coin, side):
-    """The market for one coin and side, earliest window first."""
-    found = sorted((m for m in markets if coin_of(m) == coin and side_of(m) == side),
+    """The market for one coin and side, earliest window still running first."""
+    found = sorted((m for m in markets
+                    if coin_of(m) == coin and side_of(m) == side and not_ended(m)),
                    key=lambda m: m["event_start"])
     return found[0] if found else None
 
@@ -173,7 +196,8 @@ def best(levels):
 def cmd_windows(config, private_key, args):
     """The open window and the scheduled ones after it, one row per market."""
     markets = crypto_markets(config, private_key, ["open", "scheduled"])
-    markets = [m for m in markets if not args.coin or coin_of(m) == args.coin]
+    markets = [m for m in markets
+               if (not args.coin or coin_of(m) == args.coin) and not_ended(m)]
     if not markets:
         sys.exit("No open or scheduled crypto markets.")
 
@@ -197,8 +221,9 @@ def cmd_windows(config, private_key, args):
 def cmd_book(config, private_key, args):
     """Every resting level on the current window for one coin and side.
 
-    The book comes back on the market itself as `bids` and `offers`, best
-    first, each level a dollar `price` and a `quantity` string. For a book that
+    The book comes back on the market itself as `bids` and `offers`, each level
+    a dollar `price` and a `quantity` string. sort_book has put each side best
+    first. For a book that
     updates as it changes, join the market's channel instead:
     python python/websockets/watch.py --market <symbol>
     """
@@ -245,8 +270,8 @@ def show_resting(config, private_key, market, orders):
     """
     want = {order["action"]: Decimal(order["price"]) for order in orders}
     for _ in range(10):
-        current = request(config, private_key, "GET",
-                          f"/api/v1/markets?market_ids={market['market_id']}")["markets"][0]
+        current = sort_book(request(config, private_key, "GET",
+                                    f"/api/v1/markets?market_ids={market['market_id']}")["markets"][0])
         bids = [Decimal(level["price"]) for level in current.get("bids") or []]
         offers = [Decimal(level["price"]) for level in current.get("offers") or []]
         seen = (("buy" not in want or want["buy"] in bids)

@@ -68,6 +68,31 @@ async function restGet(path) {
   return response.json();
 }
 
+/**
+ * True when the market's event has not started yet.
+ *
+ * The list comes back soonest event first, and a demo exchange can leave a game
+ * that already started (or finished) open and `scheduled`, with nobody quoting
+ * it. Pick past those.
+ */
+function upcoming(market) {
+  if (!market.event_start || !["scheduled", null, undefined].includes(market.event_status)) return false;
+  return Date.parse(market.event_start) > Date.now();
+}
+
+/** Upcoming first, then a book with both a bid and an offer, then depth. */
+function bookRank(market) {
+  const bids = market.bids?.length ?? 0;
+  const offers = market.offers?.length ?? 0;
+  return [upcoming(market) ? 1 : 0, bids && offers ? 1 : 0, bids + offers];
+}
+
+/** Sorts best book first, by bookRank. */
+const byBookRank = (a, b) => {
+  const [ra, rb] = [bookRank(a), bookRank(b)];
+  return rb[0] - ra[0] || rb[1] - ra[1] || rb[2] - ra[2];
+};
+
 // The user id in every private topic comes from here and nowhere else.
 const { me } = await restGet("/api/v1/me");
 const userId = me.user_id;
@@ -86,12 +111,7 @@ if (args.market) {
   market = live.find((m) => m.market_id === args.market || m.symbol === args.market);
   if (!market) fail(`Market ${args.market} is not open and tradeable right now.`);
 } else {
-  market = live.reduce((best, m) =>
-    (m.bids?.length ?? 0) + (m.offers?.length ?? 0) >
-    (best.bids?.length ?? 0) + (best.offers?.length ?? 0)
-      ? m
-      : best
-  );
+  market = [...live].sort(byBookRank)[0];
 }
 
 // ---------------------------------------------------------------------------

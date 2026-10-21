@@ -117,8 +117,27 @@ def rest_get(config, private_key, path):
     return response.json()
 
 
+def upcoming(market):
+    """True when the market's event has not started yet.
+
+    The list comes back soonest event first, and a demo exchange can leave a
+    game that already started (or finished) open and `scheduled`, with nobody
+    quoting it. Pick past those.
+    """
+    start = market.get("event_start")
+    if not start or market.get("event_status") not in (None, "scheduled"):
+        return False
+    return datetime.fromisoformat(start.replace("Z", "+00:00")) > datetime.now(timezone.utc)
+
+
+def book_rank(market):
+    """Upcoming first, then a book with both a bid and an offer, then depth."""
+    bids, offers = market.get("bids") or [], market.get("offers") or []
+    return (upcoming(market), bool(bids and offers), len(bids) + len(offers))
+
+
 def pick_market(config, private_key, wanted=None):
-    """One market to watch, by id or symbol, or the deepest book if not named.
+    """One market to watch, by id or symbol, or the best book if not named.
 
     Always returns the market as the API describes it, never a stub built from
     the argument. `orderbook` takes UUIDs only - it drops anything that is not
@@ -137,7 +156,7 @@ def pick_market(config, private_key, wanted=None):
                 return market
         sys.exit(f"Market {wanted} is not open and tradeable right now.")
 
-    return max(live, key=lambda m: len(m.get("bids") or []) + len(m.get("offers") or []))
+    return max(live, key=book_rank)
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +414,7 @@ async def watch(config, private_key, user_id, market, cancel_on_disconnect, ping
 def main():
     parser = argparse.ArgumentParser(description="Stream the STX book and your own activity.")
     parser.add_argument("--profile", help="profile in ~/.stx/credentials")
-    parser.add_argument("--market", help="market id or symbol (default: deepest book)")
+    parser.add_argument("--market", help="market id or symbol (default: the best upcoming book)")
     parser.add_argument("--cancel-on-disconnect", action="store_true",
                         help="ask the exchange to cancel flagged orders if this process dies")
     parser.add_argument("--ping-timeout", type=int, default=DEFAULT_PING_TIMEOUT_MS,

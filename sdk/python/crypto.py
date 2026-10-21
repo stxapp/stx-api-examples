@@ -64,9 +64,22 @@ def window_of(market: Market) -> Tuple[datetime, datetime]:
     return start, start + timedelta(minutes=int(match.group(1)) if match else 15)
 
 
+def not_ended(market: Market) -> bool:
+    """False for a window whose end has passed. A demo exchange can still list
+    an old window as open or scheduled after it ended, with no book."""
+    return window_of(market)[1] > datetime.now(timezone.utc)
+
+
 def crypto_markets(client: STX, statuses: List[str]) -> List[Market]:
     # Crypto markets are listed under the sport "Crypto".
-    return list(client.iter_markets(sports=["Crypto"], status=statuses))
+    return [m for m in client.iter_markets(sports=["Crypto"], status=statuses) if not_ended(m)]
+
+
+def sorted_book(market: Market):
+    """(bids, offers), each best first. Sort them yourself: the market lists
+    bids AND offers highest price first, so the raw offers[0] is the worst."""
+    return (sorted(market.bids, key=lambda level: Decimal(level.price), reverse=True),
+            sorted(market.offers, key=lambda level: Decimal(level.price)))
 
 
 def current_market(client: STX, coin: str, side: str) -> Market:
@@ -86,6 +99,7 @@ def fmt_left(end: datetime) -> str:
 
 
 def best(levels) -> str:
+    """The first level's price. Pass a side from sorted_book, not a raw list."""
     return levels[0].price if levels else "-"
 
 
@@ -100,8 +114,9 @@ def cmd_windows(client: STX, args) -> int:
     for m in markets:
         start, end = window_of(m)
         left = fmt_left(end) if m.status == "open" else ""
+        bids, offers = sorted_book(m)
         print(f"{m.symbol:<{width}} {m.status:<9} {fmt_time(start):>12} {fmt_time(end):>12} "
-              f"{left:>7} {best(m.bids):>7} {best(m.offers):>7}")
+              f"{left:>7} {best(bids):>7} {best(offers):>7}")
 
     open_now = next((m for m in markets if m.status == "open"), None)
     if open_now:
@@ -117,13 +132,14 @@ def cmd_book(client: STX, args) -> int:
     print(f"{market.symbol}  closes {fmt_time(end)} ({fmt_left(end)} left)")
     print(f"{market.question}\n")
 
-    if not market.bids and not market.offers:
+    bids, offers = sorted_book(market)
+    if not bids and not offers:
         print("The book is empty.")
         return 0
     print(f"{'BID QTY':>10} {'BID':>7}   {'OFFER':<7} {'OFFER QTY':<10}")
-    for i in range(max(len(market.bids), len(market.offers))):
-        bid = market.bids[i] if i < len(market.bids) else None
-        offer = market.offers[i] if i < len(market.offers) else None
+    for i in range(max(len(bids), len(offers))):
+        bid = bids[i] if i < len(bids) else None
+        offer = offers[i] if i < len(offers) else None
         print(f"{bid.quantity if bid else '':>10} {bid.price if bid else '':>7}   "
               f"{offer.price if offer else '':<7} {offer.quantity if offer else '':<10}")
     return 0
@@ -152,7 +168,8 @@ def cmd_quote(client: STX, args) -> int:
 
     _, end = window_of(market)
     print(f"{market.symbol}  closes {fmt_time(end)} ({fmt_left(end)} left)")
-    print(f"book       best bid {best(market.bids)}  best offer {best(market.offers)}")
+    bids, offers = sorted_book(market)
+    print(f"book       best bid {best(bids)}  best offer {best(offers)}")
 
     placed, exit_code = [], 0
     try:
@@ -168,7 +185,8 @@ def cmd_quote(client: STX, args) -> int:
 
         seen = wait_on_book(client, market.market_id, bid, offer)
         if seen:
-            print(f"on book    best bid {best(seen.bids)}  best offer {best(seen.offers)}")
+            bids, offers = sorted_book(seen)
+            print(f"on book    best bid {best(bids)}  best offer {best(offers)}")
         else:
             # Crossing your own resting order is rejected with
             # rejection_reason "match_with_self".

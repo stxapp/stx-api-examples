@@ -118,15 +118,45 @@ async function listMarkets(config, limit = MARKET_PAGE_LIMIT) {
   return markets;
 }
 
-/** Markets that are actually quotable right now, deepest book first. */
+/**
+ * True when the market's event has not started yet.
+ *
+ * The list comes back soonest event first, and a demo exchange can leave a game
+ * that already started (or finished) open and `scheduled`, with nobody quoting
+ * it. Those sort to the bottom rather than the top.
+ */
+function upcoming(market) {
+  if (!market.event_start || !["scheduled", null, undefined].includes(market.event_status)) return false;
+  return Date.parse(market.event_start) > Date.now();
+}
+
+/** Upcoming first, then a book with both a bid and an offer, then depth. */
+function bookRank(market) {
+  const bids = market.bids?.length ?? 0;
+  const offers = market.offers?.length ?? 0;
+  return [upcoming(market) ? 1 : 0, bids && offers ? 1 : 0, bids + offers];
+}
+
+/**
+ * The lowest offer price, or null.
+ *
+ * Not `offers[0]`: on GET /api/v1/markets bids AND offers both run highest
+ * price to lowest, so the first offer is the worst one. (The `orderbook`
+ * WebSocket push lists offers lowest first.) Bids are best first already.
+ */
+function bestOffer(market) {
+  const prices = (market.offers ?? []).map((level) => toNumber(level.price));
+  return prices.length ? Math.min(...prices) : null;
+}
+
+/** Markets that are actually quotable right now, best book first. */
 function tradeable(markets) {
   return markets
     .filter((m) => m.trading && m.status === "open")
-    .sort(
-      (a, b) =>
-        (b.bids?.length ?? 0) + (b.offers?.length ?? 0) -
-        ((a.bids?.length ?? 0) + (a.offers?.length ?? 0))
-    );
+    .sort((a, b) => {
+      const [ra, rb] = [bookRank(a), bookRank(b)];
+      return rb[0] - ra[0] || rb[1] - ra[1] || rb[2] - ra[2];
+    });
 }
 
 async function cmdMarkets(config) {
@@ -151,7 +181,7 @@ async function cmdMarkets(config) {
   );
   for (const market of shown) {
     const bid = market.bids?.[0] ? fmtMoney(market.bids[0].price) : "-";
-    const offer = market.offers?.[0] ? fmtMoney(market.offers[0].price) : "-";
+    const offer = market.offers?.length ? fmtMoney(bestOffer(market)) : "-";
     console.log(
       `${market.symbol.padEnd(symbolWidth)} ${bid.padStart(7)} ${offer.padStart(7)} ` +
         `${fmtMoney(market.max_price).padStart(7)}  ${(market.title ?? "").slice(0, titleWidth)}`

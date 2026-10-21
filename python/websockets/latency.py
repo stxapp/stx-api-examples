@@ -46,6 +46,7 @@ import os
 import statistics
 import sys
 import time
+from datetime import datetime, timezone
 from decimal import Decimal
 
 try:
@@ -113,6 +114,25 @@ def rest(config, private_key, method, path, body=None):
     return response.json()
 
 
+def upcoming(market):
+    """True when the market's event has not started yet.
+
+    The list comes back soonest event first, and a demo exchange can leave a
+    game that already started (or finished) open and `scheduled`, with nobody
+    quoting it. Pick past those.
+    """
+    start = market.get("event_start")
+    if not start or market.get("event_status") not in (None, "scheduled"):
+        return False
+    return datetime.fromisoformat(start.replace("Z", "+00:00")) > datetime.now(timezone.utc)
+
+
+def book_rank(market):
+    """Upcoming first, then a book with both a bid and an offer, then depth."""
+    bids, offers = market.get("bids") or [], market.get("offers") or []
+    return (upcoming(market), bool(bids and offers), len(bids) + len(offers))
+
+
 def pick_market(config, private_key, market_id=None):
     markets = rest(config, private_key, "GET", "/api/v1/markets?status=open&limit=200")["markets"]
     if market_id:
@@ -122,11 +142,12 @@ def pick_market(config, private_key, market_id=None):
         raise SystemExit(f"Market {market_id} is not open and tradeable right now.")
 
     live = [m for m in markets if m.get("trading") and m.get("status") == "open"]
+    live.sort(key=book_rank, reverse=True)
     # Best book first. A quiet demo can have no bids anywhere; then any market
     # without an offer at a cent will do, since the order rests at a cent.
     with_bid = [m for m in live if m.get("bids")]
     if with_bid:
-        return max(with_bid, key=lambda m: len(m["bids"]) + len(m.get("offers") or []))
+        return with_bid[0]
     for market in live:
         if not any(stx.to_decimal(o["price"]) <= Decimal("0.01") for o in market.get("offers") or []):
             return market
@@ -284,7 +305,7 @@ async def run(config, private_key, market, rounds):
 def main():
     parser = argparse.ArgumentParser(description="Measure place -> book update latency.")
     parser.add_argument("--profile", help="profile in ~/.stx/credentials")
-    parser.add_argument("--market", help="market id or symbol (default: deepest book)")
+    parser.add_argument("--market", help="market id or symbol (default: the best upcoming book)")
     parser.add_argument("--rounds", type=int, default=DEFAULT_ROUNDS,
                         help=f"place/cancel pairs (default {DEFAULT_ROUNDS}, "
                              f"capped at {MAX_ROUNDS})")

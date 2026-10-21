@@ -6,7 +6,7 @@
     python python/rest/quickstart.py orders       # your open orders
     python python/rest/quickstart.py positions    # your open positions (--market-ids to narrow)
     python python/rest/quickstart.py fills --order-id <id>   # what one order filled at
-    python python/rest/quickstart.py roundtrip    # place a resting order, then cancel it
+    python python/rest/quickstart.py roundtrip    # place a resting order, then cancel it (--market to choose)
 
 Add ``--profile <name>`` to use a profile other than ``[default]``:
 
@@ -297,7 +297,12 @@ def cmd_roundtrip(config, private_key, args):
             "Pass --force-production if you really mean to."
         )
 
-    market, price = pick_resting_price(tradeable_markets(list_markets(config, private_key)))
+    markets = tradeable_markets(list_markets(config, private_key))
+    if args.market:
+        markets = [m for m in markets if args.market in (m["market_id"], m["symbol"])]
+        if not markets:
+            sys.exit(f"Market {args.market} is not open and tradeable right now.")
+    market, price = pick_resting_price(markets)
     if market is None:
         sys.exit("No tradeable market to place an order on.")
     best_bid = stx.to_decimal(market["bids"][0]["price"]) if market.get("bids") else None
@@ -353,6 +358,7 @@ def main():
     parser.add_argument("--profile", help="profile in ~/.stx/credentials")
     parser.add_argument("--market-ids", help="`positions`: comma-separated market ids to narrow to")
     parser.add_argument("--order-id", help="`fills`: the order whose fills to list")
+    parser.add_argument("--market", help="`roundtrip`: the market id or symbol to trade on")
     parser.add_argument("--force-production", action="store_true",
                         help="allow `roundtrip` to place a real order on a production profile")
     args = parser.parse_args()

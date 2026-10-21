@@ -68,7 +68,7 @@ Sleep 12s
 Ctrl+b
 Right
 Sleep 800ms
-Type "python python/rest/quickstart.py roundtrip" Enter
+Type "python python/rest/quickstart.py roundtrip --market $SYM" Enter
 Sleep 12s
 
 # Let the last book update land.

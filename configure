@@ -129,7 +129,7 @@ fi
 
 KEY_ID=$(ask "API key id" "")
 if [ -z "$KEY_ID" ]; then
-    echo "A key id is required. Create one under Account -> API Keys." >&2
+    echo "A key id is required. Create one under the profile icon -> API Keys." >&2
     exit 1
 fi
 echo

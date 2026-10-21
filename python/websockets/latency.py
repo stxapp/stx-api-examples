@@ -121,10 +121,16 @@ def pick_market(config, private_key, market_id=None):
                 return market
         raise SystemExit(f"Market {market_id} is not open and tradeable right now.")
 
-    live = [m for m in markets if m.get("trading") and m.get("status") == "open" and m.get("bids")]
-    if not live:
-        raise SystemExit("No tradeable market with a bid to price against.")
-    return max(live, key=lambda m: len(m["bids"]) + len(m.get("offers") or []))
+    live = [m for m in markets if m.get("trading") and m.get("status") == "open"]
+    # Best book first. A quiet demo can have no bids anywhere; then any market
+    # without an offer at a cent will do, since the order rests at a cent.
+    with_bid = [m for m in live if m.get("bids")]
+    if with_bid:
+        return max(with_bid, key=lambda m: len(m["bids"]) + len(m.get("offers") or []))
+    for market in live:
+        if not any(stx.to_decimal(o["price"]) <= Decimal("0.01") for o in market.get("offers") or []):
+            return market
+    raise SystemExit("No tradeable market to place an order on.")
 
 
 async def next_book_update(ws, timeout=BOOK_TIMEOUT_SECONDS):
@@ -205,11 +211,11 @@ async def run(config, private_key, market, rounds):
 
     # REST money is a dollar string. Decimal, not float: these are exact
     # decimal values and float64 is not.
-    best_bid = stx.to_decimal(market["bids"][0]["price"])
+    best_bid = stx.to_decimal(market["bids"][0]["price"]) if market.get("bids") else None
     # Well under the touch so it rests rather than fills. A fill would measure
     # the matching engine instead of the book publish, and would leave a
-    # position behind.
-    price = max(Decimal("0.01"), best_bid - Decimal("0.10"))
+    # position behind. With no bid at all, a cent.
+    price = max(Decimal("0.01"), best_bid - Decimal("0.10")) if best_bid else Decimal("0.01")
 
     print(f"{market['symbol']}  best bid {stx.fmt_money(best_bid)}, "
           f"quoting {stx.fmt_money(price)}, {rounds} round(s)")

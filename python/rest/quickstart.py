@@ -137,6 +137,24 @@ def tradeable_markets(markets):
                   reverse=True)
 
 
+def pick_resting_price(markets):
+    """A market and a buy price that rests on its book instead of filling.
+
+    Ten cents under the best bid, floored at a cent. When no market has a bid
+    (a quiet demo book), a cent on a market with no offer at a cent. The
+    ceiling is the market's own max_price, and going over it is a 422 quoting
+    the cap.
+    """
+    for market in markets:
+        if market.get("bids"):
+            best_bid = stx.to_decimal(market["bids"][0]["price"])
+            return market, max(Decimal("0.01"), best_bid - Decimal("0.10"))
+    for market in markets:
+        if not any(stx.to_decimal(o["price"]) <= Decimal("0.01") for o in market.get("offers") or []):
+            return market, Decimal("0.01")
+    return None, None
+
+
 def cmd_markets(config, private_key, _args):
     open_markets = list_markets(config, private_key)
     markets = tradeable_markets(open_markets)
@@ -279,18 +297,10 @@ def cmd_roundtrip(config, private_key, args):
             "Pass --force-production if you really mean to."
         )
 
-    candidates = [m for m in tradeable_markets(list_markets(config, private_key))
-                  if m.get("bids")]
-    if not candidates:
-        sys.exit("No tradeable market with a bid to price against.")
-
-    market = candidates[0]
-    # Decimal, not float: these are exact decimal values and float64 is not.
-    best_bid = stx.to_decimal(market["bids"][0]["price"])
-
-    # Ten cents under the touch, floored at a cent. The ceiling is the market's
-    # own max_price, and going over it is a 422 quoting the cap.
-    price = max(Decimal("0.01"), best_bid - Decimal("0.10"))
+    market, price = pick_resting_price(tradeable_markets(list_markets(config, private_key)))
+    if market is None:
+        sys.exit("No tradeable market to place an order on.")
+    best_bid = stx.to_decimal(market["bids"][0]["price"]) if market.get("bids") else None
 
     print(f"{market['symbol']}  best bid {stx.fmt_money(best_bid)}, "
           f"max_price {stx.fmt_money(market['max_price'])}")

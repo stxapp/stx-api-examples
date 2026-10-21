@@ -271,6 +271,20 @@ async function cmdFills(config, args) {
 }
 
 /**
+ * A market and a buy price that rests on its book instead of filling.
+ *
+ * Ten cents under the best bid, floored at a cent. When no market has a bid (a
+ * quiet demo book), a cent on a market with no offer at a cent. The ceiling is
+ * the market's own max_price, and going over it is a 422 quoting the cap.
+ */
+function pickRestingPrice(markets) {
+  const withBid = markets.find((m) => m.bids?.length > 0);
+  if (withBid) return { market: withBid, price: Math.max(0.01, toNumber(withBid.bids[0].price) - 0.1) };
+  const quiet = markets.find((m) => !(m.offers ?? []).some((o) => toNumber(o.price) <= 0.01));
+  return { market: quiet, price: 0.01 };
+}
+
+/**
  * Place a limit order well away from the touch, then cancel it.
  *
  * Priced so it should rest rather than fill, but this is a real order on a real
@@ -285,16 +299,11 @@ async function cmdRoundtrip(config, args) {
     );
   }
 
-  const market = tradeable(await listMarkets(config)).find((m) => m.bids?.length > 0);
-  if (!market) fail("No tradeable market with a bid to price against.");
-
+  const { market, price } = pickRestingPrice(tradeable(await listMarkets(config)));
+  if (!market) fail("No tradeable market to place an order on.");
   // Parse before doing arithmetic. `"0.61" - 0.1` happens to work by coercion,
   // but `"0.61" + 0.1` is the string "0.610.1" and nothing warns you.
-  const bestBid = toNumber(market.bids[0].price);
-
-  // Ten cents under the touch, floored at a cent. The ceiling is the market's
-  // own max_price, and going over it is a 422 quoting the cap.
-  const price = Math.max(0.01, bestBid - 0.1);
+  const bestBid = market.bids?.length ? toNumber(market.bids[0].price) : null;
 
   console.log(
     `${market.symbol}  best bid ${fmtMoney(bestBid)}, max_price ${fmtMoney(market.max_price)}`

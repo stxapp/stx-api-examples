@@ -42,13 +42,13 @@ Guide: [docs.stxapp.io/sdks/typescript](https://docs.stxapp.io/sdks/typescript/)
 
 ```text
 $ python sdk/python/crypto.py quote --coin btc --side up --bid 0.45 --offer 0.55
-STXCRYPTO-26OCT162345-UPBTCMIN15  closes 22:00:00 MDT (11m31s left)
-book       best bid -  best offer -
-placed     BUY  1 @ 0.45  e694cd0b-8aec-4607-bb96-17c91edaa379  status=accepted
-placed     SELL 1 @ 0.55  51678edd-af71-4587-8067-fb1cbdec3f63  status=accepted
-on book    best bid 0.4500  best offer 0.5500
-cancelled  e694cd0b-8aec-4607-bb96-17c91edaa379  status=cancelled
-cancelled  51678edd-af71-4587-8067-fb1cbdec3f63  status=cancelled
+STXCRYPTO-26OCT210215-UPBTCMIN15  closes 00:30:00 MDT (7m05s left)
+book       best bid 0.4800  best offer 0.5200
+placed     BUY  1 @ 0.45  7ba5c8ac-f205-4703-9d4d-f755a60bab7a  status=accepted
+placed     SELL 1 @ 0.55  f0d7855a-08df-43df-9b32-085a56a3524a  status=accepted
+on book    best bid 0.4800  best offer 0.5200
+cancelled  7ba5c8ac-f205-4703-9d4d-f755a60bab7a  status=cancelled
+cancelled  f0d7855a-08df-43df-9b32-085a56a3524a  status=cancelled
 ```
 
 `quote` needs a `read_write` key and only places orders on a demo exchange unless you pass `--force-production`.

@@ -58,15 +58,38 @@ function fmtLeft(end: Date): string {
   return seconds > 0 ? `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s` : "ended";
 }
 
+/** The first level's price. Pass a side from sortedBook, not a raw list. */
 const best = (levels?: { price?: string | null }[] | null): string => levels?.[0]?.price ?? "-";
 
 /** Prices are dollar strings. Compare them in whole cents, never as floats. */
 const cents = (price: string): number => Math.round(Number(price) * 100);
 
+type Level = NonNullable<Market["bids"]>[number];
+
+/**
+ * [bids, offers], each best first. Sort them yourself: the market lists bids
+ * AND offers highest price first, so the raw offers[0] is the worst offer.
+ */
+function sortedBook(m: Market): [Level[], Level[]] {
+  const price = (l: Level): number => cents(l.price ?? "0");
+  return [
+    [...(m.bids ?? [])].sort((a, b) => price(b) - price(a)),
+    [...(m.offers ?? [])].sort((a, b) => price(a) - price(b)),
+  ];
+}
+
+/**
+ * False for a window whose end has passed. A demo exchange can still list an
+ * old window as open or scheduled after it ended, with no book.
+ */
+const notEnded = (m: Market): boolean => windowOf(m)[1].getTime() > Date.now();
+
 async function cryptoMarkets(client: STX, status: string[]): Promise<Market[]> {
   // Crypto markets are listed under the sport "Crypto".
   const markets: Market[] = [];
-  for await (const m of client.iterMarkets({ sports: "Crypto", status })) markets.push(m);
+  for await (const m of client.iterMarkets({ sports: "Crypto", status })) {
+    if (notEnded(m)) markets.push(m);
+  }
   return markets;
 }
 
@@ -100,8 +123,9 @@ async function windows(client: STX, args: Args): Promise<number> {
   for (const m of markets) {
     const [start, end] = windowOf(m);
     const left = m.status === "open" ? fmtLeft(end) : "";
+    const [bids, offers] = sortedBook(m);
     console.log(`${(m.symbol ?? "").padEnd(width)} ${(m.status ?? "").padEnd(9)} ${fmtTime(start).padStart(12)} ` +
-      `${fmtTime(end).padStart(12)} ${left.padStart(7)} ${best(m.bids).padStart(7)} ${best(m.offers).padStart(7)}`);
+      `${fmtTime(end).padStart(12)} ${left.padStart(7)} ${best(bids).padStart(7)} ${best(offers).padStart(7)}`);
   }
   const openNow = markets.find((m) => m.status === "open");
   if (openNow) console.log(`\n${openNow.question}\n${openNow.description}`);
@@ -116,8 +140,7 @@ async function book(client: STX, args: Args): Promise<number> {
   console.log(`${market.symbol}  closes ${fmtTime(end)} (${fmtLeft(end)} left)`);
   console.log(`${market.question}\n`);
 
-  const bids = market.bids ?? [];
-  const offers = market.offers ?? [];
+  const [bids, offers] = sortedBook(market);
   if (!bids.length && !offers.length) {
     console.log("The book is empty.");
     return 0;
@@ -155,7 +178,8 @@ async function quote(client: STX, args: Args): Promise<number> {
   }
   const [, end] = windowOf(market);
   console.log(`${market.symbol}  closes ${fmtTime(end)} (${fmtLeft(end)} left)`);
-  console.log(`book       best bid ${best(market.bids)}  best offer ${best(market.offers)}`);
+  const [bids, offers] = sortedBook(market);
+  console.log(`book       best bid ${best(bids)}  best offer ${best(offers)}`);
 
   const placed: string[] = [];
   let exitCode = 0;
@@ -174,7 +198,8 @@ async function quote(client: STX, args: Args): Promise<number> {
 
     const seen = await waitOnBook(client, market.market_id!, args.bid, args.offer);
     if (seen) {
-      console.log(`on book    best bid ${best(seen.bids)}  best offer ${best(seen.offers)}`);
+      const [seenBids, seenOffers] = sortedBook(seen);
+      console.log(`on book    best bid ${best(seenBids)}  best offer ${best(seenOffers)}`);
     } else {
       // Crossing your own resting order is rejected with
       // rejection_reason "match_with_self".

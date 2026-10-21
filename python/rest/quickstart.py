@@ -24,6 +24,7 @@ import os
 import shutil
 import sys
 import time
+from datetime import datetime, timezone
 from decimal import Decimal
 
 try:
@@ -130,11 +131,40 @@ def list_markets(config, private_key, limit=MARKET_PAGE_LIMIT):
     return request(config, private_key, "GET", path)["markets"]
 
 
+def upcoming(market):
+    """True when the market's event has not started yet.
+
+    The list comes back soonest event first, and a demo exchange can leave a
+    game that already started (or finished) open and `scheduled`, with nobody
+    quoting it. Those sort to the bottom rather than the top.
+    """
+    start = market.get("event_start")
+    if not start or market.get("event_status") not in (None, "scheduled"):
+        return False
+    return datetime.fromisoformat(start.replace("Z", "+00:00")) > datetime.now(timezone.utc)
+
+
+def book_rank(market):
+    """Upcoming first, then a book with both a bid and an offer, then depth."""
+    bids, offers = market.get("bids") or [], market.get("offers") or []
+    return (upcoming(market), bool(bids and offers), len(bids) + len(offers))
+
+
+def best_offer(market):
+    """The lowest offer price, or None.
+
+    Not `offers[0]`: on GET /api/v1/markets bids AND offers both run highest
+    price to lowest, so the first offer is the worst one. (The `orderbook`
+    WebSocket push lists offers lowest first.) Bids are best first already.
+    """
+    prices = [stx.to_decimal(level["price"]) for level in market.get("offers") or []]
+    return min(prices) if prices else None
+
+
 def tradeable_markets(markets):
     """Markets that are actually quotable right now, best book first."""
     live = [m for m in markets if m.get("trading") and m.get("status") == "open"]
-    return sorted(live, key=lambda m: len(m.get("bids") or []) + len(m.get("offers") or []),
-                  reverse=True)
+    return sorted(live, key=book_rank, reverse=True)
 
 
 def pick_resting_price(markets):
@@ -178,7 +208,7 @@ def cmd_markets(config, private_key, _args):
         bids = market.get("bids") or []
         offers = market.get("offers") or []
         bid = stx.fmt_money(bids[0]["price"]) if bids else "-"
-        offer = stx.fmt_money(offers[0]["price"]) if offers else "-"
+        offer = stx.fmt_money(best_offer(market)) if offers else "-"
         print(
             f"{market['symbol']:<{symbol_width}} {bid:>7} {offer:>7} "
             f"{stx.fmt_money(market['max_price']):>7}  {(market.get('title') or '')[:title_width]}"

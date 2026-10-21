@@ -1,8 +1,8 @@
 # Postman collection
 
 `stx-rest-api.postman_collection.json` covers every `/api/v1` route: identity,
-markets, events, orders, fills, positions and portfolio history (settlements,
-deposits, withdrawals, fees and adjustments).
+markets, events, orders, fills, positions, portfolio history (settlements,
+deposits, withdrawals, fees and adjustments) and the leaderboard.
 
 ## Setup
 

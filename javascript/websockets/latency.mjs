@@ -146,18 +146,23 @@ if (args.market) {
   market = markets.find((m) => m.market_id === args.market || m.symbol === args.market);
   if (!market) fail(`Market ${args.market} is not open and tradeable right now.`);
 } else {
-  const live = markets.filter((m) => m.trading && m.status === "open" && m.bids?.length > 0);
-  if (live.length === 0) fail("No tradeable market with a bid to price against.");
-  market = live.reduce((best, m) =>
-    m.bids.length + (m.offers?.length ?? 0) > best.bids.length + (best.offers?.length ?? 0)
-      ? m
-      : best
-  );
+  const live = markets.filter((m) => m.trading && m.status === "open");
+  // Best book first. A quiet demo can have no bids anywhere; then any market
+  // without an offer at a cent will do, since the order rests at a cent.
+  const withBid = live.filter((m) => m.bids?.length > 0);
+  market = withBid.length
+    ? withBid.reduce((best, m) =>
+        m.bids.length + (m.offers?.length ?? 0) > best.bids.length + (best.offers?.length ?? 0)
+          ? m
+          : best
+      )
+    : live.find((m) => !(m.offers ?? []).some((o) => toNumber(o.price) <= 0.01));
+  if (!market) fail("No tradeable market to place an order on.");
 }
 
 // REST money is a dollar string. Parse before doing arithmetic: `"0.61" - 0.1`
 // happens to work by coercion, but `"0.61" + 0.1` is the string "0.610.1".
-const bestBid = toNumber(market.bids[0].price);
+const bestBid = market.bids?.length ? toNumber(market.bids[0].price) : null;
 
 // Well under the touch so it rests rather than fills. A fill would measure the
 // matching engine instead of the book publish, and would leave a position

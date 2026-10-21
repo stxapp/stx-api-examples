@@ -49,6 +49,8 @@ const SKIP = {
   "Cancel several orders": "covered by Cancel an order",
   "Cancel all open orders": "would cancel orders this run did not place",
   "Accept terms and conditions": "changes the account's consent record",
+  "Get a leaderboard": "the leaderboard is off on some exchanges (404); leaderboard.py covers it",
+  "Get your leaderboard standing": "the leaderboard is off on some exchanges (404); leaderboard.py covers it",
 };
 
 // Every request gets this.

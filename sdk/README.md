@@ -2,7 +2,7 @@
 
 The crypto example from [GETTING_STARTED.md](../GETTING_STARTED.md#4b-trade-the-crypto-windows), written with the STX SDKs instead of raw signed requests. Same commands, same output. The SDK signs each request, follows cursors and turns error responses into exceptions.
 
-Both SDKs read the `~/.stx/credentials` file that `./configure` writes. Pick a profile with `STX_PROFILE`, or leave it unset to use `[default]`. [Authentication](https://docs.stxapp.io/sdks/python/authentication/) covers environment variables and the other ways to pass a key.
+Both SDKs read the `~/.stx/credentials` file that `./configure` writes, and use its `[default]` profile. To use another one, set `STX_PROFILE`, for example `export STX_PROFILE=ontario-demo` after `./configure ontario-demo`. [Authentication](https://docs.stxapp.io/sdks/python/authentication/) covers environment variables and the other ways to pass a key.
 
 ## Python
 
@@ -14,7 +14,6 @@ Give the SDK its own virtualenv, not `python/.venv`: the SDK's `stx` package wou
 python3 -m venv sdk/python/.venv && source sdk/python/.venv/bin/activate
 pip install -r sdk/python/requirements.txt
 
-export STX_PROFILE=us-demo
 python sdk/python/crypto.py windows
 python sdk/python/crypto.py book --coin btc --side up
 python sdk/python/crypto.py quote --coin btc --side up --bid 0.45 --offer 0.55
@@ -31,7 +30,6 @@ Guide: [docs.stxapp.io/sdks/python](https://docs.stxapp.io/sdks/python/)
 cd sdk/typescript
 npm ci
 
-export STX_PROFILE=us-demo
 npx tsx crypto.ts windows
 npx tsx crypto.ts book --coin btc --side up
 npx tsx crypto.ts quote --coin btc --side up --bid 0.45 --offer 0.55

@@ -9,7 +9,7 @@
     {
       "key": "base_url",
       "value": "https://demo.stxapp.io",
-      "description": "US demo. Ontario demo is https://demo.stxapp.ca; Ontario production is https://stxapp.ca, which needs a production key. US production is not open yet."
+      "description": "US demo. Ontario demo is https://demo.stxapp.ca; Ontario production is https://api.on.stxapp.ca, which needs a production key created at https://stxapp.ca. US production is not open yet."
     },
     {
       "key": "key_id",
@@ -944,6 +944,112 @@
         }
       ],
       "description": "Your executions, per-market exposure, settlements, deposits, withdrawals and loyalty status. All read-only."
+    },
+    {
+      "name": "Leaderboard",
+      "item": [
+        {
+          "name": "Get a leaderboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/leaderboard?period=weekly&category=all&metric=profit&limit=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leaderboard"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "weekly"
+                },
+                {
+                  "key": "category",
+                  "value": "all"
+                },
+                {
+                  "key": "metric",
+                  "value": "profit"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "The top rows of one board. Every parameter is optional."
+          }
+        },
+        {
+          "name": "Get your leaderboard standing",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-STX-ACCESS-KEY",
+                "value": "{{key_id}}"
+              },
+              {
+                "key": "X-STX-ACCESS-TIMESTAMP",
+                "value": "{{timestamp}}"
+              },
+              {
+                "key": "X-STX-ACCESS-SIGNATURE",
+                "value": "{{signature}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/leaderboard/me?period=weekly&category=all",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "leaderboard",
+                "me"
+              ],
+              "query": [
+                {
+                  "key": "period",
+                  "value": "weekly"
+                },
+                {
+                  "key": "category",
+                  "value": "all"
+                }
+              ]
+            },
+            "description": "Your own rank and value on each board."
+          }
+        }
+      ]
     },
     {
       "name": "Terms",

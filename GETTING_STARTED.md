@@ -47,9 +47,12 @@ read even market data.
 
 1. Register on the environment you will build against. For the US demo exchange
    that is [demo.stxapp.io](https://demo.stxapp.io); for the Ontario demo
-   exchange, [demo.stxapp.ca](https://demo.stxapp.ca).
-2. **Account -> API Keys -> Create API Key.** Choose `read_only`, or
-   `read_write` if you want to place orders in step 5.
+   exchange, [demo.stxapp.ca](https://demo.stxapp.ca). Verify your email
+   address from the link it sends, then log in. Demo accounts start with test
+   funds, so there is nothing to deposit.
+2. Open the profile icon, top right, then **API Keys -> Create key**. Give it a
+   nickname and choose **Read only**, or **Read/Write** if you want to place
+   orders in step 5.
 3. Copy the **key id** and the **private key PEM**. The matching public key is
    generated for you and stored on the server. The private key is shown once
    and is never stored by the exchange, so save it before closing the dialog.
@@ -81,7 +84,7 @@ openssl genpkey -algorithm ed25519 -out ~/.stx/default.pem
 openssl pkey -in ~/.stx/default.pem -pubout
 ```
 
-Paste that public key into **Account -> API Keys -> Create API Key** in place of
+Paste that public key into the **Create key** dialog (profile icon -> **API Keys**) in place of
 letting the exchange generate one. You still get a **key id** back; pair it with
 your local PEM in `./configure`.
 
@@ -243,14 +246,16 @@ python python/rest/crypto.py results --coin eth      # how recent windows settle
 
 Crypto markets are the sport `Crypto`, so `GET /api/v1/markets?sports=Crypto` returns only them. Add `status=open` for the window trading now, or `status=scheduled` for the ones after it. A market's `specifier` is the coin (`btc`, `eth`) and its `rules` is `crypto_up` or `crypto_down`; `question` and `description` give the reference price and the times.
 
-The same commands, written with an STX SDK instead of raw requests, are in [`sdk/`](./sdk/): `python sdk/python/crypto.py` uses [`stx-python`](https://pypi.org/project/stx-python/) and `npx tsx crypto.ts` in `sdk/typescript` uses [`@stxapp/stx-typescript`](https://www.npmjs.com/package/@stxapp/stx-typescript). Both read the profile `./configure` wrote; pick it with `STX_PROFILE`.
+The same commands, written with an STX SDK instead of raw requests, are in [`sdk/`](./sdk/): `python sdk/python/crypto.py` uses [`stx-python`](https://pypi.org/project/stx-python/) and `npx tsx crypto.ts` in `sdk/typescript` uses [`@stxapp/stx-typescript`](https://www.npmjs.com/package/@stxapp/stx-typescript). Both use the `[default]` profile `./configure` wrote; set `STX_PROFILE` to pick another.
 
 `quote` needs a `read_write` key. It places a limit buy at `--bid` and a limit sell at `--offer` on the current window, reads the book until both show, and cancels them; add `--keep` to leave them resting. A sell needs no position: it opens a short. An order that would trade against your own resting order is rejected with `rejection_reason: "match_with_self"`.
 
 ## 5. Place and cancel an order
 
 Needs a `read_write` key. This places a real order, priced ten cents below the
-best bid so it rests instead of filling, then cancels it. Note the `price` it
+best bid so it rests instead of filling, then cancels it. When no market has a
+bid, it buys at $0.01 on a market with no offer that low, which rests just the
+same. Note the `price` it
 sends is the string `"0.5100"`: a number there is a `400`, and
 [Prices](#prices) says why.
 

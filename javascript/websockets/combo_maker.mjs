@@ -18,10 +18,9 @@
 // cash out you quote what you pay for everything the player sells:
 // --cash-out-price a contract. Each quote stands for --quote-seconds.
 //
-// Combos run on the US demo and Ontario demo exchanges, and need a read_write
-// key: a read_only key is refused at the join. CHANNELS.md has every frame this
-// sends and receives. Like watch_channel.mjs this speaks the raw frames, with
-// only `ws` for the transport.
+// Combos need a read_write key: a read_only key is refused at the join.
+// CHANNELS.md has every frame this sends and receives. Like watch_channel.mjs
+// this speaks the raw frames, with only `ws` for the transport.
 
 import WebSocket from "ws";
 import { loadProfile, signedHeaders, parseArgs, fail, SOCKET_PATH, unreachable } from "../stx.mjs";

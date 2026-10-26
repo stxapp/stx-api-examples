@@ -93,8 +93,8 @@ and balances on one authenticated socket, in the same dollar format as REST.
 [Every channel](./CHANNELS.md)
 
 **Combos**: quote every combo request as a maker over a plain socket, and see
-how each one ends: won, lost to another maker, expired or closed (US demo and
-Ontario demo). [Quote combos as a maker](./CHANNELS.md#combos-combo_quoteuser_id-and-rfquser_id)
+how each one ends: won, lost to another maker, expired or closed.
+[Quote combos as a maker](./CHANNELS.md#combos-combo_quoteuser_id-and-rfquser_id)
 
 **Latency**: measure the round trip from placing an order to seeing it on the
 book, in both runtimes, on your own network path.

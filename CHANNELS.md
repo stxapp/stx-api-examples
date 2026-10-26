@@ -453,7 +453,7 @@ A combo is one market over two or more legs. A player asks for quotes on the
 legs and a stake on `rfq:<user_id>`, every maker joined to its own
 `combo_quote:<user_id>` sees the request and may quote, and the player accepts
 the best. The exchange then places one ordinary order for each side on the
-combo's market. Combos run on the US demo and Ontario demo exchanges.
+combo's market.
 `python/websockets/combo_maker.py` and `javascript/websockets/combo_maker.mjs`
 are complete makers: they quote every request and print how each one ends.
 

@@ -19,9 +19,8 @@ On a buy you quote what the player wins: the stake times --win-multiple. On a
 cash out you quote what you pay for everything the player sells:
 --cash-out-price a contract. Each quote stands for --quote-seconds.
 
-Combos run on the US demo and Ontario demo exchanges, and need a read_write
-key: a read_only key is refused at the join. CHANNELS.md has every frame this
-sends and receives.
+Combos need a read_write key: a read_only key is refused at the join.
+CHANNELS.md has every frame this sends and receives.
 
 Requires the packages in python/requirements.txt; ``./install.sh`` puts them in
 python/.venv.

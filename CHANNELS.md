@@ -136,6 +136,8 @@ plain integers - the same wire format as `/api/v1`. See
 | `balances:<user_id>` | private | your balances |
 | `account:<user_id>` | private | the five private topics on one join |
 | `user_info:<user_id>` | private | account and profile changes |
+| `combo_quote:<user_id>` | private, `read_write` | combo requests to quote, as a maker |
+| `rfq:<user_id>` | private, `read_write` | your own combo requests, as a player |
 
 **Do not join `account:` and a per-type topic on the same socket.** You will
 receive every update twice.
@@ -444,6 +446,110 @@ listed here for completeness rather than shown.
 ```sh
 python python/websockets/watch_channel.py --topic 'user_info:<user_id>'
 ```
+
+## Combos: `combo_quote:<user_id>` and `rfq:<user_id>`
+
+A combo is one market over two or more legs. A player asks for quotes on the
+legs and a stake on `rfq:<user_id>`, every maker joined to its own
+`combo_quote:<user_id>` sees the request and may quote, and the player accepts
+the best. The exchange then places one ordinary order for each side on the
+combo's market. Combos run on the US demo and Ontario demo exchanges.
+`python/websockets/combo_maker.py` and `javascript/websockets/combo_maker.mjs`
+are complete makers: they quote every request and print how each one ends.
+
+```sh
+python python/websockets/combo_maker.py --frames
+node javascript/websockets/combo_maker.mjs --win-multiple 12 --frames
+```
+
+Every frame below was captured on `demo.stxapp.ca`. `--frames` prints them the
+same way, `->` for what the maker sent and `<-` for what came back.
+
+**Join.** Both topics need a key with `read_write` scope. The reply names your
+`external_id`, your pseudonym as a player:
+
+```json
+["1","1","combo_quote:<user_id>","phx_join",{}]
+["1","1","combo_quote:<user_id>","phx_reply",{"status":"ok","response":{"external_id":"99427df0-95a8-4ed6-8393-38518befc5a2","next_geolocation_at":null}}]
+```
+
+**A request arrives.** `rfq_opened` reaches every maker for every request
+opened after the join, your own account's included. It carries your
+`join_ref`, and `external_id` is now the player's. On a buy `amount` is the
+stake; on a cash out (`"side":"sell"`) `market_id` is the combo and `quantity`
+the size. Price against `max_price` and `tick_size`, not a constant:
+
+```json
+["1",null,"combo_quote:<user_id>","rfq_opened",{"amount":"2.0000","external_id":"4b536883-f547-4b73-9ddd-fd4710559202","expires_at":1793049051698004,"market_id":null,"quantity":null,"max_price":"1.0000","side":"buy","legs":[{"short_name":"WSH @ CHA","market_id":"1d32d3f4-df14-4c29-a76a-0456c6018583","outcome":"won"},{"short_name":"LA @ NYR","market_id":"872aeb01-fe95-408d-8d6e-3c3523a9bc3e","outcome":"won"}],"tick_size":"0.0001000","rfq_id":"53e4f693-a491-4d15-8107-2b0b20b12788"}]
+```
+
+**Quote.** On a buy `amount` is what the player wins; on a cash out, what you
+pay for the whole size. It is a string, like every amount, and
+`expires_in_ms` is how long the quote stands. `client_order_id` is copied onto
+your order if the quote is taken:
+
+```json
+["1","2","combo_quote:<user_id>","quote",{"rfq_id":"53e4f693-a491-4d15-8107-2b0b20b12788","amount":"30.00","expires_in_ms":30000,"client_order_id":"maker-53e4f693"}]
+["1","2","combo_quote:<user_id>","phx_reply",{"status":"ok","response":{"amount":"30.0000","external_id":"4b536883-f547-4b73-9ddd-fd4710559202","quote_id":"5db90cc4-76cf-4c6b-a93f-467697459c26"}}]
+```
+
+**Won.** The player accepted: `quote_accepted`, then `placed` with your order,
+at the same price and size as the player's. `rfq_closed` follows for every
+maker:
+
+```json
+[null,null,"combo_quote:<user_id>","quote_accepted",{"external_id":"4b536883-f547-4b73-9ddd-fd4710559202","market_id":null,"rfq_id":"53e4f693-a491-4d15-8107-2b0b20b12788","quote_id":"5db90cc4-76cf-4c6b-a93f-467697459c26"}]
+[null,null,"combo_quote:<user_id>","placed",{"external_id":"4b536883-f547-4b73-9ddd-fd4710559202","market_id":"df0489de-8f36-4fde-818e-adeaf038bde3","quantity":"32.00","price":"0.0625","order_id":"9db31fdd-464f-4208-8076-d22b716986cc","rfq_id":"53e4f693-a491-4d15-8107-2b0b20b12788","quote_id":"5db90cc4-76cf-4c6b-a93f-467697459c26"}]
+["1",null,"combo_quote:<user_id>","rfq_closed",{"reason":"placed","market_id":"df0489de-8f36-4fde-818e-adeaf038bde3","rfq_id":"53e4f693-a491-4d15-8107-2b0b20b12788"}]
+```
+
+`quote_accepted` alone is not a trade: the exchange still checks both sides,
+and `negotiation_closed` can follow instead of `placed`.
+
+**Lost, expired, ended.** Each of your quotes that stops standing gets one
+`negotiation_closed` with a `reason`: `placed_elsewhere` when another maker's
+quote was taken, `expired` when its time ran out and a later quote replaced it,
+or the request's own reason, such as `cancelled`. `rfq_closed` says how the
+request itself ended, whether you quoted or not.
+
+**On the player's side** the same request looked like this. `best_quote` shows
+only the best live amount, never who quoted it, and `accept` takes it at that
+amount or better:
+
+```json
+["1","2","rfq:<user_id>","request_quote",{"legs":[{"market_id":"1d32d3f4-df14-4c29-a76a-0456c6018583","outcome":"won"},{"market_id":"872aeb01-fe95-408d-8d6e-3c3523a9bc3e","outcome":"won"}],"amount":"2.00"}]
+["1","2","rfq:<user_id>","phx_reply",{"status":"ok","response":{"rfq_id":"53e4f693-a491-4d15-8107-2b0b20b12788"}}]
+[null,null,"rfq:<user_id>","best_quote",{"amount":"30.0000","expires_at":1793048781782602,"market_id":null,"rfq_id":"53e4f693-a491-4d15-8107-2b0b20b12788","quote_id":"5db90cc4-76cf-4c6b-a93f-467697459c26"}]
+["1","3","rfq:<user_id>","accept",{"rfq_id":"53e4f693-a491-4d15-8107-2b0b20b12788","quote_id":"5db90cc4-76cf-4c6b-a93f-467697459c26","amount":"30.0000"}]
+[null,null,"rfq:<user_id>","placed",{"market_id":"df0489de-8f36-4fde-818e-adeaf038bde3","quantity":"32.00","price":"0.0625","order_id":"11ff2de0-06bf-4700-86ac-ef19809ac978","rfq_id":"53e4f693-a491-4d15-8107-2b0b20b12788"}]
+["1","3","rfq:<user_id>","phx_reply",{"status":"ok","response":{"market_id":"df0489de-8f36-4fde-818e-adeaf038bde3","quantity":"32.00","price":"0.0625","order_id":"11ff2de0-06bf-4700-86ac-ef19809ac978"}}]
+```
+
+The price comes from the amounts: 1.0000 x 2 / (2 + 30) = 0.0625, and 2.00
+buys 32 whole contracts at that price. `cash_out` with a combo's `market_id`
+opens a sell request the same way.
+
+**Refusals** arrive as a `phx_reply` with `"status":"error"` and a `reason`. A
+`read_only` key is refused at the join, and quoting a request your own account
+opened is refused too:
+
+```json
+["1","1","combo_quote:<user_id>","phx_reply",{"status":"error","response":{"reason":"This API key does not have write access"}}]
+["1","2","combo_quote:<user_id>","phx_reply",{"status":"error","response":{"reason":"cannot_quote_own_request"}}]
+```
+
+On an exchange without combos every join is refused with `unmatched topic`.
+A quote whose amount prices outside the request's grid is refused with
+`price_out_of_range` or `below_one_contract`; the examples check that before
+they send one. [Combo negotiation](https://docs.stxapp.io/websockets/channels/combo-negotiation/)
+lists every command, push and refusal.
+
+**Connections.** A quote belongs to the connection that placed it, and a
+request to the one that opened it: when the socket drops, they are withdrawn,
+and nothing is restored on reconnect. Every socket joined as the same account
+gets the pushes about all of that account's quotes, so run one maker per
+account. On reconnect, follow [Reconnecting](#reconnecting) and quote again as
+new requests arrive.
 
 ## Reconnecting
 

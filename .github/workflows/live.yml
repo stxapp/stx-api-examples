@@ -159,6 +159,16 @@ jobs:
       - name: node quickstart.mjs roundtrip, watched by watch.mjs
         run: .github/scripts/watched-roundtrip.sh js ${{ matrix.name }}
 
+      # Joins combo_quote as a maker for 15 s each. Quotes only if a request
+      # arrives in that time; a quote is withdrawn when the script exits.
+      - name: combo_maker.py and combo_maker.mjs join as a maker
+        run: |
+          for run in "$PY python/websockets/combo_maker.py" "node javascript/websockets/combo_maker.mjs"; do
+            $run --seconds 15 | tee combo-maker.log
+            grep -q '^Joined combo_quote:' combo-maker.log || { echo "::error::$run did not join combo_quote on ${{ matrix.name }}"; exit 1; }
+            grep -q '^Stopped\.' combo-maker.log || { echo "::error::$run did not stop cleanly on ${{ matrix.name }}"; exit 1; }
+          done
+
       - name: newman (Postman collection)
         run: |
           node .github/scripts/postman-ci.mjs "$RUNNER_TEMP/ci.postman_collection.json"

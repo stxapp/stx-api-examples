@@ -16,7 +16,7 @@ you want a maintained client instead, use an STX SDK:
 
 ```
 install.sh  configure  verify       setup and signing check - POSIX shell only
-python/     rest/  websockets/      signed REST, live channels, latency
+python/     rest/  websockets/      signed REST, live channels, combo maker, latency
 javascript/ rest/  websockets/
 postman/                            REST collection, one request per route
 sdk/        python/  typescript/    the same examples written with the STX SDKs
@@ -91,6 +91,10 @@ handle, avatar or listing.
 and balances on one authenticated socket, in the same dollar format as REST.
 [Watch it live](./GETTING_STARTED.md#6-watch-it-live) ·
 [Every channel](./CHANNELS.md)
+
+**Combos**: quote every combo request as a maker over a plain socket, and see
+how each one ends: won, lost to another maker, expired or closed (US demo and
+Ontario demo). [Quote combos as a maker](./CHANNELS.md#combos-combo_quoteuser_id-and-rfquser_id)
 
 **Latency**: measure the round trip from placing an order to seeing it on the
 book, in both runtimes, on your own network path.

@@ -11,9 +11,16 @@ name: Live
 # back and cancels it. The last step checks none of those is still
 # open, and cancels any that is.
 #
+# Combos: each combo maker example quotes a small combo that the run's own
+# account requests, buys and cashes out (.github/scripts/combo-roundtrip.sh).
+# The makers run as accounts of their own, since a maker cannot quote its own
+# account's request.
+#
 # Needs these repository secrets (read_write API keys, the PEM as text):
 #   US_DEMO_API_KEY_ID, US_DEMO_API_KEY_PEM            (region us, env demo)
 #   ONTARIO_DEMO_API_KEY_ID, ONTARIO_DEMO_API_KEY_PEM  (region ontario, env demo)
+#   <prefix>_MAKER_PY_API_KEY_ID / _PEM and <prefix>_MAKER_JS_API_KEY_ID / _PEM,
+#   one maker account each for combo_maker.py and combo_maker.mjs
 #
 # Never runs on pull requests, so the secrets are not exposed to them.
 
@@ -38,7 +45,7 @@ defaults:
 jobs:
   live:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -58,20 +65,30 @@ jobs:
       STX_KEY_ID: ${{ secrets[format('{0}_API_KEY_ID', matrix.prefix)] }}
       # A path, not the key: the examples read the PEM from this file.
       STX_KEY_FILE: ~/.stx/ci.pem
+      MAKER_PY_KEY_ID: ${{ secrets[format('{0}_MAKER_PY_API_KEY_ID', matrix.prefix)] }}
+      MAKER_JS_KEY_ID: ${{ secrets[format('{0}_MAKER_JS_API_KEY_ID', matrix.prefix)] }}
       PY: python/.venv/bin/python
     steps:
       - name: Credentials
         env:
           KEY_PEM: ${{ secrets[format('{0}_API_KEY_PEM', matrix.prefix)] }}
+          MAKER_PY_PEM: ${{ secrets[format('{0}_MAKER_PY_API_KEY_PEM', matrix.prefix)] }}
+          MAKER_JS_PEM: ${{ secrets[format('{0}_MAKER_JS_API_KEY_PEM', matrix.prefix)] }}
         run: |
           if [ -z "$STX_KEY_ID" ] || [ -z "$KEY_PEM" ]; then
             echo "::error::Secrets ${{ matrix.prefix }}_API_KEY_ID and ${{ matrix.prefix }}_API_KEY_PEM must be set to run the examples on ${{ matrix.name }}."
+            exit 1
+          fi
+          if [ -z "$MAKER_PY_KEY_ID" ] || [ -z "$MAKER_PY_PEM" ] || [ -z "$MAKER_JS_KEY_ID" ] || [ -z "$MAKER_JS_PEM" ]; then
+            echo "::error::Secrets ${{ matrix.prefix }}_MAKER_PY_API_KEY_ID / _PEM and ${{ matrix.prefix }}_MAKER_JS_API_KEY_ID / _PEM must be set to run the combo makers on ${{ matrix.name }}."
             exit 1
           fi
           # What ./configure writes, without its prompts.
           umask 077
           mkdir -p ~/.stx
           printf '%s\n' "$KEY_PEM" > ~/.stx/ci.pem
+          printf '%s\n' "$MAKER_PY_PEM" > ~/.stx/maker-py.pem
+          printf '%s\n' "$MAKER_JS_PEM" > ~/.stx/maker-js.pem
           printf '[ci]\nregion   = %s\nenv      = %s\nkey_id   = %s\nkey_file = %s\n' \
             "$STX_REGION" "$STX_ENV" "$STX_KEY_ID" "$HOME/.stx/ci.pem" > ~/.stx/credentials
           # Ids of the orders this run places, for the last step.
@@ -159,15 +176,19 @@ jobs:
       - name: node quickstart.mjs roundtrip, watched by watch.mjs
         run: .github/scripts/watched-roundtrip.sh js ${{ matrix.name }}
 
-      # Joins combo_quote as a maker for 15 s each. Quotes only if a request
-      # arrives in that time; a quote is withdrawn when the script exits.
-      - name: combo_maker.py and combo_maker.mjs join as a maker
-        run: |
-          for run in "$PY python/websockets/combo_maker.py" "node javascript/websockets/combo_maker.mjs"; do
-            $run --seconds 15 | tee combo-maker.log
-            grep -q '^Joined combo_quote:' combo-maker.log || { echo "::error::$run did not join combo_quote on ${{ matrix.name }}"; exit 1; }
-            grep -q '^Stopped\.' combo-maker.log || { echo "::error::$run did not stop cleanly on ${{ matrix.name }}"; exit 1; }
-          done
+      # Each maker example quotes a combo this run's account buys and cashes
+      # out; its quote has to be the one placed (see combo-roundtrip.sh).
+      - name: combo_maker.py quotes a live request
+        env:
+          MAKER_KEY_ID: ${{ env.MAKER_PY_KEY_ID }}
+          MAKER_KEY_FILE: ~/.stx/maker-py.pem
+        run: .github/scripts/combo-roundtrip.sh py ${{ matrix.name }}
+
+      - name: combo_maker.mjs quotes a live request
+        env:
+          MAKER_KEY_ID: ${{ env.MAKER_JS_KEY_ID }}
+          MAKER_KEY_FILE: ~/.stx/maker-js.pem
+        run: .github/scripts/combo-roundtrip.sh js ${{ matrix.name }}
 
       - name: newman (Postman collection)
         run: |

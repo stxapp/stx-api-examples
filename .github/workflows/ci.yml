@@ -78,6 +78,7 @@ jobs:
             sh -n "$script"
           done
           bash -n .github/scripts/watched-roundtrip.sh
+          bash -n .github/scripts/combo-roundtrip.sh
       - name: Postman collection builds into the Live run
         # Fails if a request was added to or renamed in the collection without
         # deciding whether the Live run sends it.

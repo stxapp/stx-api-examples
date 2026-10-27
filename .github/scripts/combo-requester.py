@@ -3,6 +3,7 @@
 the best maker quote, then cash it out, so the run ends holding nothing.
 
     python .github/scripts/combo-requester.py [--stake 1.00] [--wait 30] [--gather 3]
+    python .github/scripts/combo-requester.py --player-id   # print "Player: <external_id>" and exit
 
 Runs beside python/websockets/combo_maker.py or javascript/websockets/combo_maker.mjs,
 started as a different account, so the maker under test can quote these requests.
@@ -156,6 +157,10 @@ async def run(args):
             status, response = await player.send("phx_join", {})
             if status != "ok":
                 sys.exit(f"Join refused: {response.get('reason')}")
+            if args.player_id:
+                # The pseudonym makers see on this account's requests.
+                print(f"Player: {response['external_id']}")
+                return 0
             legs = pick_legs(rest)
             if len(legs) < 2:
                 sys.exit("Not enough open markets from different events for a combo.")
@@ -211,6 +216,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--stake", default="1.00", help="dollars, whole cents (default 1.00)")
     parser.add_argument("--wait", type=float, default=30, help="seconds to wait for a first quote (default 30)")
+    parser.add_argument("--player-id", action="store_true", help="print this account's external_id and exit")
     parser.add_argument("--gather", type=float, default=3, help="seconds to keep reading after it (default 3)")
     sys.exit(asyncio.run(run(parser.parse_args())))
 

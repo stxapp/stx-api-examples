@@ -4,6 +4,7 @@
     python python/websockets/combo_maker.py
     python python/websockets/combo_maker.py --win-multiple 12 --cash-out-price 0.10
     python python/websockets/combo_maker.py --frames      # also print every frame
+    python python/websockets/combo_maker.py --player <external_id>   # quote one player only
 
 Players ask for quotes on a combo: a set of legs and a stake to buy, or a combo
 they hold to cash out. Every maker joined to its `combo_quote:<user_id>` topic
@@ -146,6 +147,8 @@ class Maker:
                         self.reply(ref, payload)
                     elif event == "rfq_opened":
                         # Every request opened after the join, from every player, your own included.
+                        if self.args.player and payload.get("external_id") != self.args.player:
+                            continue
                         print(f"[request]  {short(payload['rfq_id'])}  {describe(payload)}")
                         await self.quote(ws, join_ref, payload)
                     elif event == "quote_accepted":
@@ -235,6 +238,7 @@ def main():
                         help="on a cash out, pay this a contract (default 0.08)")
     parser.add_argument("--quote-seconds", type=float, default=30, help="how long each quote stands (default 30)")
     parser.add_argument("--seconds", type=float, help="stop after this many seconds (default: run until Ctrl-C)")
+    parser.add_argument("--player", help="quote only requests carrying this external_id (default: every player)")
     parser.add_argument("--frames", action="store_true", help="also print every frame sent and received")
     args = parser.parse_args()
 

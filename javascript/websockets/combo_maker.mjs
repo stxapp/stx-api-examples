@@ -3,6 +3,7 @@
 //   node javascript/websockets/combo_maker.mjs
 //   node javascript/websockets/combo_maker.mjs --win-multiple 12 --cash-out-price 0.10
 //   node javascript/websockets/combo_maker.mjs --frames      # also print every frame
+//   node javascript/websockets/combo_maker.mjs --player <external_id>   # quote one player only
 //
 // Players ask for quotes on a combo: a set of legs and a stake to buy, or a
 // combo they hold to cash out. Every maker joined to its combo_quote:<user_id>
@@ -32,7 +33,7 @@ const HEARTBEAT_MS = 30_000;
 const BACKOFF = [1, 2, 5, 10, 30];
 
 const USAGE = `usage: combo_maker.mjs [--profile PROFILE] [--win-multiple N] [--cash-out-price P]
-                       [--quote-seconds S] [--seconds S] [--frames]
+                       [--quote-seconds S] [--seconds S] [--player ID] [--frames]
 
 Quote every combo request as a maker.
 
@@ -42,6 +43,7 @@ options:
   --cash-out-price P   on a cash out, pay this a contract (default 0.08)
   --quote-seconds S    how long each quote stands (default 30)
   --seconds S          stop after this many seconds (default: run until Ctrl-C)
+  --player ID          quote only requests carrying this external_id (default: every player)
   --frames             also print every frame sent and received`;
 
 const args = parseArgs();
@@ -161,6 +163,7 @@ function connect() {
         break;
       case "rfq_opened": {
         // Every request opened after the join, from every player, your own included.
+        if (args.player && payload.external_id !== String(args.player)) break;
         console.log(`[request]  ${rfq}  ${describe(payload)}`);
         const amount = quoteAmount(payload);
         if (amount === null) {

@@ -456,6 +456,8 @@ the best. The exchange then places one ordinary order for each side on the
 combo's market.
 `python/websockets/combo_maker.py` and `javascript/websockets/combo_maker.mjs`
 are complete makers: they quote every request and print how each one ends.
+`--player <external_id>` keeps them to one player's requests, such as your own
+test account's (its `external_id` comes back on the `rfq:<user_id>` join).
 
 ```sh
 python python/websockets/combo_maker.py --frames

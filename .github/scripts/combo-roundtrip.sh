@@ -11,9 +11,9 @@
 #
 # Checked: the maker quoted the request, and its quote was the one placed
 # (`[won]` for that request: the placed push reaches only the winning maker);
-# the player bought, sold and holds nothing at the end. Another maker can still
-# match the quote first (another run's maker, say), so a buy placed elsewhere
-# is tried once more with a new request. Winning the cash out too is reported,
+# the player bought, sold and holds nothing at the end. The maker quotes only
+# this player's requests (--player). Another maker can still quote higher, so a
+# buy placed elsewhere is tried once more with a new request. Winning the cash out too is reported,
 # not required.
 set -eo pipefail
 # Job control, so the maker in the background still takes SIGINT and stops cleanly.
@@ -26,8 +26,11 @@ else
 fi
 log="combo-maker-$lang.log"
 
-STX_KEY_ID="$MAKER_KEY_ID" STX_KEY_FILE="$MAKER_KEY_FILE" "${maker[@]}" \
-  --seconds 300 --win-multiple 20 --cash-out-price 0.50 --quote-seconds 30 > "$log" 2>&1 &
+# The maker quotes only this run's player, so it never trades with another run.
+player=$("$PY" .github/scripts/combo-requester.py --player-id | awk '/^Player:/ { print $2 }')
+[ -n "$player" ] || { echo "::error::the requester printed no player id on $name"; exit 1; }
+STX_KEY_ID="$MAKER_KEY_ID" STX_KEY_FILE="$MAKER_KEY_FILE" "${maker[@]}" --player "$player" \
+  --seconds 300 --win-multiple 12 --cash-out-price 0.40 --quote-seconds 30 > "$log" 2>&1 &
 pid=$!
 for _ in $(seq 1 30); do grep -q '^Joined combo_quote:' "$log" && break; sleep 0.5; done
 grep -q '^Joined combo_quote:' "$log" || { cat "$log"; echo "::error::${maker[*]} did not join combo_quote on $name"; exit 1; }

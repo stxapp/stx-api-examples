@@ -60,4 +60,13 @@ book       best bid 0.4800  best offer 0.5200
 not here   Post-only orders are not available on demo.stxapp.io (version 3.3.210-rnd.4) yet.
 ```
 
+The TypeScript example takes the same flag:
+
+```text
+$ npx tsx crypto.ts quote --coin btc --side up --bid 0.05 --offer 0.95 --post-only
+STXBTC15M-26NOV172045-UP  closes 19:00:00 MST (1m05s left)
+book       best bid 0.4800  best offer 0.5200
+not here   Post-only orders are not available on demo.stxapp.io (version 3.3.210-rnd.4) yet.
+```
+
 A request blocked before it reaches the exchange (a location or network it does not serve) raises the SDK's blocked error with a `reason` and a `reference` to quote to STX support; `crypto` prints both and exits.

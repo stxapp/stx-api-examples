@@ -6,6 +6,7 @@
  *     npx tsx crypto.ts book --coin btc --side up
  *     npx tsx crypto.ts quote --coin btc --side up --bid 0.45 --offer 0.55
  *     npx tsx crypto.ts quote --coin btc --side up --bid 0.45 --offer 0.55 --keep
+ *     npx tsx crypto.ts quote --coin btc --side up --bid 0.45 --offer 0.55 --post-only
  *     npx tsx crypto.ts results --coin btc       # how recent windows settled
  *
  * Each crypto market is one short window, 15 minutes today, on one coin. A
@@ -22,13 +23,25 @@
  * given. A sell needs no position: it opens a short. It needs a read_write key
  * and refuses any exchange but a demo one unless --force-production is given.
  *
+ * `--post-only` places both sides post-only, so neither ever takes liquidity:
+ * a side that would trade on arrival is not placed. Exchanges that do not offer
+ * post-only orders yet throw STXNotAvailableException before anything is sent.
+ *
  * Install: npm ci (in sdk/typescript)
  */
 
 import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
 
-import { STX, STXRejectedException, STXValidationException } from "@stxapp/stx-typescript";
+import {
+  STX,
+  STXBlockedException,
+  STXNotAvailableException,
+  STXPostOnlyWouldMatchException,
+  STXRateLimitException,
+  STXRejectedException,
+  STXValidationException,
+} from "@stxapp/stx-typescript";
 import type { Market } from "@stxapp/stx-typescript";
 
 const COINS = ["btc", "eth"];
@@ -106,7 +119,7 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-type Args = { coin?: string; side: string; bid: string; offer: string; quantity: string; keep: boolean; limit: number };
+type Args = { coin?: string; side: string; bid: string; offer: string; quantity: string; keep: boolean; postOnly: boolean; limit: number };
 
 async function windows(client: STX, args: Args): Promise<number> {
   const markets = (await cryptoMarkets(client, ["open", "scheduled"]))
@@ -191,6 +204,8 @@ async function quote(client: STX, args: Args): Promise<number> {
         price,
         quantity: args.quantity,
         clientOrderId: `crypto-${randomUUID()}`,
+        // post_only: rest on the book as a maker or not at all. Left out, a normal order.
+        fillMode: args.postOnly ? "post_only" : undefined,
       });
       placed.push(order.id!);
       console.log(`placed     ${action.toUpperCase().padEnd(4)} ${args.quantity} @ ${price}  ${order.id}  status=${order.status}`);
@@ -210,9 +225,20 @@ async function quote(client: STX, args: Args): Promise<number> {
       exitCode = 1;
     }
   } catch (err) {
-    if (!(err instanceof STXRejectedException || err instanceof STXValidationException)) throw err;
-    console.error(`Order refused (${err.statusCode}): ${err.message}`);
-    exitCode = 1;
+    if (err instanceof STXNotAvailableException) {
+      // The exchange does not offer post-only orders yet; nothing was sent.
+      console.log(`not here   ${err.message}`);
+    } else if (err instanceof STXPostOnlyWouldMatchException) {
+      // This side would have traded on arrival, so the exchange did not place it.
+      // reason is "auto_matching", or "match_with_self" when it would cross your own order.
+      console.error(`not placed a post-only order would have matched (${err.reason}); quote wider`);
+      exitCode = 1;
+    } else if (err instanceof STXRejectedException || err instanceof STXValidationException) {
+      console.error(`Order refused (${err.statusCode}): ${err.message}`);
+      exitCode = 1;
+    } else {
+      throw err;
+    }
   } finally {
     if (args.keep && exitCode === 0) {
       console.log("\nLeft on the book. Cancel each with client.cancelOrder(orderId).");
@@ -259,6 +285,7 @@ async function main(): Promise<number> {
       offer: { type: "string", default: "0.55" },
       quantity: { type: "string", default: "1" },
       keep: { type: "boolean", default: false },
+      "post-only": { type: "boolean", default: false },
       limit: { type: "string", default: "4" },
       "force-production": { type: "boolean", default: false },
     },
@@ -274,6 +301,7 @@ async function main(): Promise<number> {
     offer: values.offer!,
     quantity: values.quantity!,
     keep: values.keep!,
+    postOnly: values["post-only"]!,
     limit: Number(values.limit),
   };
 
@@ -285,7 +313,16 @@ async function main(): Promise<number> {
     fail(`Refusing to place orders on ${client.baseUrl} from an example script.\nPass --force-production if you really mean to.`);
   }
   console.error(`[${client.baseUrl}]\n`);
-  return COMMANDS[command](client, args);
+  try {
+    return await COMMANDS[command](client, args);
+  } catch (err) {
+    // Refused before it reached the exchange (a location or network it does not
+    // serve, or no User-Agent). Retrying will not help; quote the reference.
+    if (err instanceof STXBlockedException) fail(`Blocked (${err.reason}): ${err.message}  reference ${err.reference}`);
+    // The SDK already waited Retry-After and retried; this is what was left.
+    if (err instanceof STXRateLimitException) fail(`Rate limited: retry after ${err.retryAfter} s  reference ${err.reference}`);
+    throw err;
+  }
 }
 
 process.exitCode = await main();

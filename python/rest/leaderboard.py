@@ -74,6 +74,11 @@ def request(config, private_key, method, path, body=None):
 
     if response.status_code == 404 and "not enabled" in response.text:
         sys.exit("The leaderboard is not enabled on this deployment.")
+    # Refused in front of the exchange: a location or network it does not
+    # serve, too many requests, or no User-Agent. See stx.blocked().
+    message = stx.blocked(response)
+    if message:
+        sys.exit(message)
     if not response.ok:
         sys.exit(f"{method} {path} -> HTTP {response.status_code}: {response.text[:300]}")
     return response.json()

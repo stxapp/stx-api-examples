@@ -270,6 +270,12 @@ placed     <order id>  status=accepted  price=0.4800  filled=0.00
 cancelled  status=cancelled
 ```
 
+`roundtrip --post-only` sends the same order with `"fill_mode": "post_only"`: it only ever rests on the book as a maker, and if it would match on arrival the exchange cancels it (`cancellation_reason` `auto_matching`) instead of trading. Not every exchange offers post-only orders yet, and one that does not know `fill_mode` ignores it and places a normal order, so the script first reads `GET /api_version` and sends nothing unless `features` lists `order_post_only`:
+
+```
+Post-only orders are not available on https://demo.stxapp.io (version 3.3.210-rnd.4) yet. Nothing was sent.
+```
+
 That is the full loop: signed request, order accepted, order cancelled. It
 refuses to run against a production profile unless you pass
 `--force-production`. When you do move to production, remember that your demo
@@ -511,10 +517,11 @@ These examples send `stx-api-examples/1.0 (python/3.13.7)`, built in one place
 per language (`USER_AGENT` in `python/stx.py` and `javascript/stx.mjs`), so every
 request carries it. Change the product name to your own.
 
-**It is not required.** A request with no `User-Agent` is accepted. It is
-recorded against your API key, though, so a recognisable string is what lets
-support find your calls when you report a problem, rather than picking your
-traffic out of every default `python-requests/2.x` in the logs.
+**It is required.** A request with no `User-Agent` is refused with a `403` before it reaches the exchange. It is also recorded against your API key, so a recognisable string is what lets support find your calls when you report a problem, rather than picking your traffic out of every default `python-requests/2.x` in the logs.
+
+### Blocked requests
+
+A request refused in front of the exchange, before the exchange sees it, has no `x-stx-error` header. With a reason, its body is JSON: `{"error": "restricted_jurisdiction", "message": "STX isn't available in your country. Quote the reference when you contact STX support.", "reference": "x-amz-cf-id response header"}`, where `error` is `restricted_jurisdiction` or `unusual_network` (`403`) or `rate_limited` (`429`, with `Retry-After: 60`). The body is the same for everyone; the reference to quote to support is the `x-amz-cf-id` response header, for example `Fm2a5Xq0pZ8Lw3YbH7rT9kUeN1cVdJ6oSgA4iQ-BzMxPyWl5RtOk3A==`. Never retry those `403`s, since the same request is blocked again; retry a `429` after `Retry-After`. A `403` that is not JSON most often means the request had no `User-Agent`. `blocked()` in `python/stx.py` turns each of these into a message, and the Python examples use it.
 
 ### Prices
 

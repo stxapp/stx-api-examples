@@ -85,6 +85,11 @@ def request(config, private_key, method, path, body=None):
             f"  Is this key for {config['region']}/{config['env']}? Is the clock right?\n"
             f"  Body: {response.text[:300]}"
         )
+    # Refused in front of the exchange: a location or network it does not
+    # serve, too many requests, or no User-Agent. See stx.blocked().
+    message = stx.blocked(response)
+    if message:
+        sys.exit(message)
     if not response.ok:
         sys.exit(f"HTTP {response.status_code} on {method} {path}: {response.text[:500]}")
     return response.json()

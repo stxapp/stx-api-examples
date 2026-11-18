@@ -6,6 +6,7 @@
     python sdk/python/crypto.py book --coin btc --side up
     python sdk/python/crypto.py quote --coin btc --side up --bid 0.45 --offer 0.55
     python sdk/python/crypto.py quote --coin btc --side up --bid 0.45 --offer 0.55 --keep
+    python sdk/python/crypto.py quote --coin btc --side up --bid 0.45 --offer 0.55 --post-only
     python sdk/python/crypto.py results --coin btc       # how recent windows settled
 
 Each crypto market is one short window, 15 minutes today, on one coin. A window
@@ -22,6 +23,10 @@ current window, shows them on the book, and cancels both unless --keep is
 given. A sell needs no position: it opens a short. It needs a read_write key
 and refuses any exchange but a demo one unless --force-production is given.
 
+``--post-only`` places both sides post-only, so neither ever takes liquidity:
+a side that would trade on arrival is not placed. Exchanges that do not offer
+post-only orders yet raise STXNotAvailableError before anything is sent.
+
 Install: pip install -r sdk/python/requirements.txt
 """
 
@@ -35,7 +40,15 @@ from decimal import Decimal
 from typing import List, Optional, Tuple
 from urllib.parse import urlparse
 
-from stx import STX, STXRejectedException, STXValidationException
+from stx import (
+    STX,
+    STXBlockedException,
+    STXNotAvailableError,
+    STXPostOnlyWouldMatchException,
+    STXRateLimitException,
+    STXRejectedException,
+    STXValidationException,
+)
 from stx.models import Market
 
 COINS = ("btc", "eth")
@@ -172,6 +185,8 @@ def cmd_quote(client: STX, args) -> int:
     print(f"book       best bid {best(bids)}  best offer {best(offers)}")
 
     placed, exit_code = [], 0
+    # post_only: rest on the book as a maker or not at all. None is a normal order.
+    fill_mode = "post_only" if args.post_only else None
     try:
         for action, price in (("buy", args.bid), ("sell", args.offer)):
             # Price and quantity are dollar strings. The client_order_id is your
@@ -179,6 +194,7 @@ def cmd_quote(client: STX, args) -> int:
             order = client.place_order(
                 market.market_id, action, "limit",
                 price=price, quantity=args.quantity, client_order_id=f"crypto-{uuid.uuid4()}",
+                fill_mode=fill_mode,
             )
             placed.append(order.id)
             print(f"placed     {action.upper():<4} {args.quantity} @ {price}  {order.id}  status={order.status}")
@@ -194,6 +210,14 @@ def cmd_quote(client: STX, args) -> int:
                 o = client.order(order_id)
                 print(f"not seen   {o.action} @ {o.price}  status={o.status}  {o.rejection_reason or ''}")
             exit_code = 1
+    except STXNotAvailableError as exc:
+        # The exchange does not offer post-only orders yet; nothing was sent.
+        print(f"not here   {exc}")
+    except STXPostOnlyWouldMatchException as exc:
+        # This side would have traded on arrival, so the exchange did not place it.
+        # reason is "auto_matching", or "match_with_self" when it would cross your own order.
+        print(f"not placed a post-only order would have matched ({exc.reason}); quote wider", file=sys.stderr)
+        exit_code = 1
     except (STXRejectedException, STXValidationException) as exc:
         print(f"Order refused ({exc.status_code}): {exc}", file=sys.stderr)
         exit_code = 1
@@ -236,6 +260,8 @@ def main() -> int:
     parser.add_argument("--offer", default="0.55", help="`quote`: sell price in dollars")
     parser.add_argument("--quantity", default="1", help="`quote`: contracts per side")
     parser.add_argument("--keep", action="store_true", help="`quote`: leave the orders resting")
+    parser.add_argument("--post-only", action="store_true",
+                        help="`quote`: place both sides post-only (maker only)")
     parser.add_argument("--limit", type=int, default=4, help="`results`: how many windows to show")
     parser.add_argument("--force-production", action="store_true",
                         help="allow `quote` to place real orders on a non-demo exchange")
@@ -251,7 +277,15 @@ def main() -> int:
             sys.exit(f"Refusing to place orders on {client.base_url} from an example script.\n"
                      "Pass --force-production if you really mean to.")
         print(f"[{client.base_url}]\n", file=sys.stderr)
-        return COMMANDS[args.command](client, args)
+        try:
+            return COMMANDS[args.command](client, args)
+        except STXBlockedException as exc:
+            # Refused before it reached the exchange (a location or network it does
+            # not serve, or no User-Agent). Retrying will not help; quote the reference.
+            sys.exit(f"Blocked ({exc.reason}): {exc}  reference {exc.reference}")
+        except STXRateLimitException as exc:
+            # The SDK already waited Retry-After and retried; this is what was left.
+            sys.exit(f"Rate limited: retry after {exc.retry_after} s  reference {exc.reference}")
 
 
 if __name__ == "__main__":

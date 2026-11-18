@@ -51,10 +51,11 @@ const LEGACY_ENVS = { integration: "demo", production: "prod" };
 const KNOWN_KEYS = ["region", "env", "key_id", "key_file", "base_url",
   "exchange", "environment", "private_key"];
 
-// Identify your client. NOT required: the API accepts a request with no
-// User-Agent. It is recorded against your API key though, so a recognisable
-// string is what lets support tell your traffic from everyone else's when you
-// report a problem. Change the product name to your own and keep the shape:
+// Identify your client. Required: a request with no User-Agent is refused with
+// a 403 before it reaches the exchange. It is also recorded against your API
+// key, so a recognisable string is what lets support tell your traffic from
+// everyone else's when you report a problem. Change the product name to your
+// own and keep the shape:
 //
 //   <product>/<version> (<runtime>)
 export const USER_AGENT = `stx-api-examples/1.0 (node/${process.versions.node})`;

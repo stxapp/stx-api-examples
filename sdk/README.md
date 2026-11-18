@@ -51,4 +51,13 @@ cancelled  7ba5c8ac-f205-4703-9d4d-f755a60bab7a  status=cancelled
 cancelled  f0d7855a-08df-43df-9b32-085a56a3524a  status=cancelled
 ```
 
-`quote` needs a `read_write` key and only places orders on a demo exchange unless you pass `--force-production`.
+`quote` needs a `read_write` key and only places orders on a demo exchange unless you pass `--force-production`. Add `--post-only` to place both sides post-only, so neither ever takes liquidity: a side that would trade on arrival is not placed. On an exchange that does not offer post-only orders yet, the SDK raises a not-available error before anything is sent:
+
+```text
+$ python sdk/python/crypto.py quote --coin btc --side up --bid 0.05 --offer 0.95 --post-only
+STXBTC15M-26NOV172030-UP  closes 18:45:00 MST (1m10s left)
+book       best bid 0.4800  best offer 0.5200
+not here   Post-only orders are not available on demo.stxapp.io (version 3.3.210-rnd.4) yet.
+```
+
+A request blocked before it reaches the exchange (a location or network it does not serve) raises the SDK's blocked error with a `reason` and a `reference` to quote to STX support; `crypto` prints both and exits.

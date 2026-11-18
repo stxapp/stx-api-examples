@@ -7,6 +7,7 @@
     python python/rest/quickstart.py positions    # your open positions (--market-ids to narrow)
     python python/rest/quickstart.py fills --order-id <id>   # what one order filled at
     python python/rest/quickstart.py roundtrip    # place a resting order, then cancel it (--market to choose)
+    python python/rest/quickstart.py roundtrip --post-only   # the same order, post-only (maker only)
 
 Add ``--profile <name>`` to use a profile other than ``[default]``:
 
@@ -75,6 +76,11 @@ def request(config, private_key, method, path, body=None):
             f"  Body: {response.text[:300]}"
         )
 
+    # Refused in front of the exchange: a location or network it does not
+    # serve, too many requests, or no User-Agent. See stx.blocked().
+    message = stx.blocked(response)
+    if message:
+        sys.exit(message)
     if not response.ok:
         # 400 is a malformed request. On POST /api/v1/orders the usual cause is
         # a `price` sent as a number instead of a dollar string - see
@@ -84,6 +90,33 @@ def request(config, private_key, method, path, body=None):
         sys.exit(f"HTTP {response.status_code}: {response.text[:500]}")
 
     return response.json()
+
+
+def api_features(config):
+    """GET /api_version - which optional features this exchange has switched on.
+
+    Unsigned. The answer is ``{"api_version": "3.4.26", "features": [...]}``;
+    ``order_post_only`` and ``order_fill_or_kill`` are listed only where those
+    fill modes are on. An exchange without the list, or one that does not serve
+    the path (a 404, or a 403 from the edge that is not JSON), has neither.
+
+    Check before sending a fill_mode: an exchange that does not know the field
+    ignores it and places a normal order, which could take liquidity.
+    """
+    try:
+        response = requests.get(config["base_url"] + "/api_version",
+                                headers={"User-Agent": stx.USER_AGENT}, timeout=15)
+    except requests.exceptions.ConnectionError as error:
+        sys.exit(stx.unreachable(config["base_url"], error))
+    bare_403 = response.status_code == 403 and "json" not in response.headers.get("Content-Type", "")
+    if response.status_code == 404 or bare_403:
+        return None, []
+    message = stx.blocked(response)
+    if message:
+        sys.exit(message)
+    response.raise_for_status()
+    body = response.json()
+    return body.get("api_version"), body.get("features") or []
 
 
 # ---------------------------------------------------------------------------
@@ -332,6 +365,12 @@ def cmd_roundtrip(config, private_key, args):
         markets = [m for m in markets if args.market in (m["market_id"], m["symbol"])]
         if not markets:
             sys.exit(f"Market {args.market} is not open and tradeable right now.")
+    if args.post_only:
+        version, features = api_features(config)
+        if "order_post_only" not in features:
+            print(f"Post-only orders are not available on {config['base_url']} "
+                  f"(version {version or 'unknown'}) yet. Nothing was sent.")
+            return
     market, price = pick_resting_price(markets)
     if market is None:
         sys.exit("No tradeable market to place an order on.")
@@ -357,6 +396,12 @@ def cmd_roundtrip(config, private_key, args):
         # push about it. Use it to tie exchange state to your own.
         "client_order_id": f"quickstart-{int(time.time())}",
     }
+    if args.post_only:
+        # Rest on the book as a maker or not at all. If it would match on
+        # arrival, the exchange answers 200 with the order cancelled
+        # (cancellation_reason "auto_matching"), or 422 when the order it would
+        # match is your own.
+        body["fill_mode"] = "post_only"
 
     # The body is flat. Wrapping it in {"user_order": {...}} returns 400. And a
     # successful placement is a 200, not a 201.
@@ -364,7 +409,11 @@ def cmd_roundtrip(config, private_key, args):
     # The echoed price is the same order at the server's width: "0.51" in,
     # "0.5100" back. Compare as decimals, never as strings.
     print(f"placed     {order['id']}  status={order['status']}  "
-          f"price={order['price']}  filled={order.get('filled', '0.00')}")
+          f"price={order['price']}  filled={order.get('filled', '0.00')}"
+          + (f"  fill_mode={order.get('fill_mode')}" if args.post_only else ""))
+    if order["status"] == "cancelled" and order.get("cancellation_reason") == "auto_matching":
+        print("not placed it would have matched on arrival, so the exchange cancelled it")
+        return
 
     cancelled = request(
         config, private_key, "DELETE", f"/api/v1/orders/{order['id']}"
@@ -389,6 +438,8 @@ def main():
     parser.add_argument("--market-ids", help="`positions`: comma-separated market ids to narrow to")
     parser.add_argument("--order-id", help="`fills`: the order whose fills to list")
     parser.add_argument("--market", help="`roundtrip`: the market id or symbol to trade on")
+    parser.add_argument("--post-only", action="store_true",
+                        help="`roundtrip`: place the order post-only (maker only)")
     parser.add_argument("--force-production", action="store_true",
                         help="allow `roundtrip` to place a real order on a production profile")
     args = parser.parse_args()

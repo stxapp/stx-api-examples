@@ -51,22 +51,23 @@ cancelled  7ba5c8ac-f205-4703-9d4d-f755a60bab7a  status=cancelled
 cancelled  f0d7855a-08df-43df-9b32-085a56a3524a  status=cancelled
 ```
 
-`quote` needs a `read_write` key and only places orders on a demo exchange unless you pass `--force-production`. Add `--post-only` to place both sides post-only, so neither ever takes liquidity: a side that would trade on arrival is not placed. On an exchange that does not offer post-only orders yet, the SDK raises a not-available error before anything is sent:
+`quote` needs a `read_write` key and only places orders on a demo exchange unless you pass `--force-production`. Add `--post-only` to place both sides post-only, so neither ever takes liquidity: a side that would trade on arrival is not placed.
 
 ```text
 $ python sdk/python/crypto.py quote --coin btc --side up --bid 0.05 --offer 0.95 --post-only
-STXBTC15M-26NOV172030-UP  closes 18:45:00 MST (1m10s left)
+STXBTC15M-26NOV271830-UP  closes 16:45:00 MST (7m50s left)
 book       best bid 0.4800  best offer 0.5200
-not here   Post-only orders are not available on demo.stxapp.io (version 3.3.210-rnd.4) yet.
+placed     BUY  1 @ 0.05  e53fdd51-d9d9-4198-9ae6-6d5ab35942e7  status=accepted
+placed     SELL 1 @ 0.95  16188252-0237-4a29-9325-f4c7fe9e1ee5  status=accepted
+on book    best bid 0.4800  best offer 0.5200
+cancelled  e53fdd51-d9d9-4198-9ae6-6d5ab35942e7  status=cancelled
+cancelled  16188252-0237-4a29-9325-f4c7fe9e1ee5  status=cancelled
 ```
 
-The TypeScript example takes the same flag:
+The TypeScript example takes the same flag. Not every exchange offers post-only orders yet ([Order types](https://docs.stxapp.io/concepts/order-types/) says which do). The SDK sends the order as it is; an exchange that has the mode switched off refuses it, the SDK raises its not-available error, and nothing is placed:
 
 ```text
-$ npx tsx crypto.ts quote --coin btc --side up --bid 0.05 --offer 0.95 --post-only
-STXBTC15M-26NOV172045-UP  closes 19:00:00 MST (1m05s left)
-book       best bid 0.4800  best offer 0.5200
-not here   Post-only orders are not available on demo.stxapp.io (version 3.3.210-rnd.4) yet.
+not here   Post-only orders are not available on demo.stxapp.ca yet.
 ```
 
 A request blocked before it reaches the exchange (a location or network it does not serve) raises the SDK's blocked error with a `reason` and a `reference` to quote to STX support; `crypto` prints both and exits.

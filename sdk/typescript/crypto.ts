@@ -24,8 +24,9 @@
  * and refuses any exchange but a demo one unless --force-production is given.
  *
  * `--post-only` places both sides post-only, so neither ever takes liquidity:
- * a side that would trade on arrival is not placed. Exchanges that do not offer
- * post-only orders yet throw STXNotAvailableException before anything is sent.
+ * a side that would trade on arrival is not placed. An exchange that has
+ * post-only orders switched off refuses them, and the SDK throws
+ * STXNotAvailableException; nothing is placed.
  *
  * Install: npm ci (in sdk/typescript)
  */
@@ -226,7 +227,7 @@ async function quote(client: STX, args: Args): Promise<number> {
     }
   } catch (err) {
     if (err instanceof STXNotAvailableException) {
-      // The exchange does not offer post-only orders yet; nothing was sent.
+      // The exchange has post-only orders switched off; nothing was placed.
       console.log(`not here   ${err.message}`);
     } else if (err instanceof STXPostOnlyWouldMatchException) {
       // This side would have traded on arrival, so the exchange did not place it.

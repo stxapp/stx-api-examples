@@ -45,8 +45,20 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import stx  # noqa: E402
 
 
-def request(config, private_key, method, path, body=None):
+class Refused(Exception):
+    """An error answer the caller asked to handle itself (see ``request``)."""
+
+    def __init__(self, status, message):
+        super().__init__(f"HTTP {status}: {message}")
+        self.status = status
+        self.message = message
+
+
+def request(config, private_key, method, path, body=None, handle=()):
     """Send one signed request and return the decoded JSON.
+
+    An error status listed in ``handle`` raises ``Refused`` with the
+    exchange's message instead of exiting, for callers that act on it.
 
     The signature covers the method and the path INCLUDING any query string, so
     the path is built before signing and then used verbatim. Signing
@@ -81,6 +93,12 @@ def request(config, private_key, method, path, body=None):
     message = stx.blocked(response)
     if message:
         sys.exit(message)
+    if response.status_code in handle:
+        try:
+            message = response.json().get("error") or response.text
+        except ValueError:
+            message = response.text
+        raise Refused(response.status_code, str(message)[:500])
     if not response.ok:
         # 400 is a malformed request. On POST /api/v1/orders the usual cause is
         # a `price` sent as a number instead of a dollar string - see
@@ -90,33 +108,6 @@ def request(config, private_key, method, path, body=None):
         sys.exit(f"HTTP {response.status_code}: {response.text[:500]}")
 
     return response.json()
-
-
-def api_features(config):
-    """GET /api_version - which optional features this exchange has switched on.
-
-    Unsigned. The answer is ``{"api_version": "3.4.26", "features": [...]}``;
-    ``order_post_only`` and ``order_fill_or_kill`` are listed only where those
-    fill modes are on. An exchange without the list, or one that does not serve
-    the path (a 404, or a 403 from the edge that is not JSON), has neither.
-
-    Check before sending a fill_mode: an exchange that does not know the field
-    ignores it and places a normal order, which could take liquidity.
-    """
-    try:
-        response = requests.get(config["base_url"] + "/api_version",
-                                headers={"User-Agent": stx.USER_AGENT}, timeout=15)
-    except requests.exceptions.ConnectionError as error:
-        sys.exit(stx.unreachable(config["base_url"], error))
-    bare_403 = response.status_code == 403 and "json" not in response.headers.get("Content-Type", "")
-    if response.status_code == 404 or bare_403:
-        return None, []
-    message = stx.blocked(response)
-    if message:
-        sys.exit(message)
-    response.raise_for_status()
-    body = response.json()
-    return body.get("api_version"), body.get("features") or []
 
 
 # ---------------------------------------------------------------------------
@@ -365,12 +356,6 @@ def cmd_roundtrip(config, private_key, args):
         markets = [m for m in markets if args.market in (m["market_id"], m["symbol"])]
         if not markets:
             sys.exit(f"Market {args.market} is not open and tradeable right now.")
-    if args.post_only:
-        version, features = api_features(config)
-        if "order_post_only" not in features:
-            print(f"Post-only orders are not available on {config['base_url']} "
-                  f"(version {version or 'unknown'}) yet. Nothing was sent.")
-            return
     market, price = pick_resting_price(markets)
     if market is None:
         sys.exit("No tradeable market to place an order on.")
@@ -405,7 +390,16 @@ def cmd_roundtrip(config, private_key, args):
 
     # The body is flat. Wrapping it in {"user_order": {...}} returns 400. And a
     # successful placement is a 200, not a 201.
-    order = request(config, private_key, "POST", "/api/v1/orders", body)["order"]
+    try:
+        order = request(config, private_key, "POST", "/api/v1/orders", body,
+                        handle=(400,) if args.post_only else ())["order"]
+    except Refused as refusal:
+        # An exchange with post-only switched off refuses the order with a
+        # 400 "fill_mode post_only is not enabled". Nothing was placed.
+        if "not enabled" in refusal.message:
+            print(f"not placed {refusal.message} on {config['base_url']}")
+            return
+        sys.exit(str(refusal))
     # The echoed price is the same order at the server's width: "0.51" in,
     # "0.5100" back. Compare as decimals, never as strings.
     print(f"placed     {order['id']}  status={order['status']}  "
@@ -414,6 +408,10 @@ def cmd_roundtrip(config, private_key, args):
     if order["status"] == "cancelled" and order.get("cancellation_reason") == "auto_matching":
         print("not placed it would have matched on arrival, so the exchange cancelled it")
         return
+    if args.post_only and order.get("fill_mode") != "post_only":
+        # A release from before fill modes ignores fill_mode and places a
+        # normal order, which can take liquidity. Check what came back.
+        print("warning    the exchange placed this as a normal order, not post-only")
 
     cancelled = request(
         config, private_key, "DELETE", f"/api/v1/orders/{order['id']}"

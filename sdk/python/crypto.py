@@ -24,8 +24,9 @@ given. A sell needs no position: it opens a short. It needs a read_write key
 and refuses any exchange but a demo one unless --force-production is given.
 
 ``--post-only`` places both sides post-only, so neither ever takes liquidity:
-a side that would trade on arrival is not placed. Exchanges that do not offer
-post-only orders yet raise STXNotAvailableError before anything is sent.
+a side that would trade on arrival is not placed. An exchange that has
+post-only orders switched off refuses them, and the SDK raises
+STXNotAvailableError; nothing is placed.
 
 Install: pip install -r sdk/python/requirements.txt
 """
@@ -211,7 +212,7 @@ def cmd_quote(client: STX, args) -> int:
                 print(f"not seen   {o.action} @ {o.price}  status={o.status}  {o.rejection_reason or ''}")
             exit_code = 1
     except STXNotAvailableError as exc:
-        # The exchange does not offer post-only orders yet; nothing was sent.
+        # The exchange has post-only orders switched off; nothing was placed.
         print(f"not here   {exc}")
     except STXPostOnlyWouldMatchException as exc:
         # This side would have traded on arrival, so the exchange did not place it.

@@ -270,11 +270,22 @@ placed     <order id>  status=accepted  price=0.4800  filled=0.00
 cancelled  status=cancelled
 ```
 
-`roundtrip --post-only` sends the same order with `"fill_mode": "post_only"`: it only ever rests on the book as a maker, and if it would match on arrival the exchange cancels it (`cancellation_reason` `auto_matching`) instead of trading. Not every exchange offers post-only orders yet, and one that does not know `fill_mode` ignores it and places a normal order, so the script first reads `GET /api_version` and sends nothing unless `features` lists `order_post_only`:
+`roundtrip --post-only` sends the same order with `"fill_mode": "post_only"`: it only ever rests on the book as a maker, and if it would match on arrival the exchange cancels it (`cancellation_reason` `auto_matching`) instead of trading.
 
 ```
-Post-only orders are not available on https://demo.stxapp.io (version 3.3.210-rnd.4) yet. Nothing was sent.
+STXNCAAF-26NOV271530FLAFSU-SPREADFSUPLUS4.5  best bid $0.23, max_price $1.00
+placing    BUY 1 @ $0.13
+placed     <order id>  status=accepted  price=0.1300  filled=0.00  fill_mode=post_only
+cancelled  status=cancelled
 ```
+
+Not every exchange offers post-only orders yet; [Order types](https://docs.stxapp.io/concepts/order-types/) says which do. The script sends the order and lets the exchange decide. One that has the mode switched off refuses it with a `400`, and nothing is placed:
+
+```
+not placed fill_mode post_only is not enabled on https://demo.stxapp.ca
+```
+
+An exchange on a release from before fill modes may instead ignore `fill_mode` and place a normal order, so the script checks the `fill_mode` the order comes back with and warns when it is not `post_only`.
 
 That is the full loop: signed request, order accepted, order cancelled. It
 refuses to run against a production profile unless you pass
